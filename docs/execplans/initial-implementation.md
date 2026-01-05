@@ -142,6 +142,11 @@ in tmux via `#(dbar)` and all specified tests pass.
   `pr_cache_ttl_seconds`. Rationale: keep the CLI optional arguments optional
   and avoid missing-argument failures in tests. Date/Author: 2026-01-05 / Codex
 
+- Decision: wire tmux `pane_current_path` into the install snippet to scope
+  git probes to the active pane directory. Rationale: ensures branch and
+  project context match the shell running inside tmux. Date/Author: 2026-01-05
+  / Codex
+
 ## Outcomes & Retrospective
 
 Implemented a tmux status line renderer with install support, git metadata, PR
@@ -337,3 +342,5 @@ Revised 2026-01-05 to capture integration test discovery, clap defaults, and
 progress updates.
 
 Revised 2026-01-05 to mark the plan complete with final outcomes.
+
+Revised 2026-01-05 to document the pane current path update.
