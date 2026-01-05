@@ -45,8 +45,16 @@ If you prefer to edit tmux manually, use a command substitution and pass tmux
 formats into `dbar status`:
 
 ```tmux
-set -g status-right '#(dbar status --session "#{session_name}" --window "#{window_index}" --pane "#{pane_id}")'
+set -g status-right '#(dbar status \
+  --project-dir "#{pane_current_path}" \
+  --session "#{session_name}" \
+  --window "#{window_index}" \
+  --pane "#{pane_id}" \
+  --socket "#{socket_path}")'
 ```
+
+Tmux supports line continuations with trailing backslashes, so this snippet can
+be wrapped for readability.
 
 The tmux status line protocol and style tags are explained in
 `docs/tmux-statuslines-in-a-nutshell.md`.

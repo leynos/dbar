@@ -124,7 +124,8 @@ fn build_snippet(position: StatusPosition) -> String {
         StatusPosition::Right => "status-right",
     };
     let command = concat!(
-        "dbar status --session \"#{session_name}\" ",
+        "dbar status --project-dir \"#{pane_current_path}\" ",
+        "--session \"#{session_name}\" ",
         "--window \"#{window_index}\" ",
         "--pane \"#{pane_id}\" ",
         "--socket \"#{socket_path}\""
