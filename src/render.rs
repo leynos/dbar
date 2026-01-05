@@ -7,7 +7,7 @@ use crate::types::{PrNumber, ProjectName};
 const GLYPH_FADE_RIGHT: &str = "\u{e0c6}";
 const GLYPH_BRANCH: &str = "\u{f418}";
 const GLYPH_PR: &str = "\u{f408}";
-const GLYPH_CHIP: &str = "\u{e266}";
+const GLYPH_WORKTREE: &str = "\u{f0e69}";
 const GLYPH_DIRTY: &str = "\u{f444}";
 const GLYPH_STAGED: &str = "\u{f457}";
 const GLYPH_AHEAD: &str = "\u{f432}";
@@ -161,9 +161,9 @@ fn render_pr_segment(pr: &PrNumber) -> String {
 
 fn render_worktree_indicator() -> String {
     format!(
-        "{}{} wt{}",
+        "{}{}{}",
         style(Some(COLOUR_CHIP_WARN), None),
-        GLYPH_CHIP,
+        GLYPH_WORKTREE,
         reset()
     )
 }
