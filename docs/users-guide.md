@@ -30,8 +30,11 @@ configuration file. It writes a marked block so the snippet can be updated in
 place on subsequent runs.
 
 ```sh
-cargo run -- install --path ~/.tmux.conf --position right
+cargo run -- install --path ~/.tmux.conf --position left
 ```
+
+The install command defaults to `--path ~/.tmux.conf --position left` when no
+arguments are supplied.
 
 Use `--dry-run` to preview the snippet without writing to disk:
 

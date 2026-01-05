@@ -236,9 +236,9 @@ impl FromStr for CacheTtlSeconds {
 /// tmux status line placement for the install snippet.
 pub enum StatusPosition {
     /// Apply the snippet to `status-left`.
+    #[default]
     Left,
     /// Apply the snippet to `status-right`.
-    #[default]
     Right,
 }
 
