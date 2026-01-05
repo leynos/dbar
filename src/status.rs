@@ -10,6 +10,7 @@ use crate::command::CommandRunner;
 use crate::config::StatusArgs;
 use crate::error::DbarError;
 use crate::git;
+use crate::github::GitHubClient;
 use crate::render;
 use crate::tmux::{self, TmuxContext};
 use crate::types::PrNumber;
@@ -21,13 +22,15 @@ use crate::types::PrNumber;
 /// ```rust,ignore
 /// use dbar::command::RealCommandRunner;
 /// use dbar::config::StatusArgs;
+/// use dbar::github::GhCliClient;
 /// use dbar::status::build_status_line;
 /// use mockable::DefaultClock;
 ///
 /// let args = StatusArgs::default();
 /// let runner = RealCommandRunner::default();
+/// let github = GhCliClient::new(&runner);
 /// let clock = DefaultClock;
-/// let line = build_status_line(&args, &runner, &clock)?;
+/// let line = build_status_line(&args, &runner, &clock, &github)?;
 /// assert!(!line.is_empty());
 /// # Ok::<(), dbar::DbarError>(())
 /// ```
@@ -35,6 +38,7 @@ pub fn build_status_line(
     args: &StatusArgs,
     runner: &dyn CommandRunner,
     clock: &dyn Clock,
+    github: &dyn GitHubClient,
 ) -> Result<String, DbarError> {
     let project_dir = resolve_project_dir(args)?;
     let project = git::project_name(runner, &project_dir);
@@ -45,8 +49,8 @@ pub fn build_status_line(
         git_status.as_ref().and_then(|status| {
             pr_number(&PrLookup {
                 args,
-                runner,
                 clock,
+                github,
                 project_dir: &project_dir,
                 branch: status.branch.as_ref(),
             })
@@ -78,8 +82,8 @@ pub fn build_status_line(
 
 struct PrLookup<'a> {
     args: &'a StatusArgs,
-    runner: &'a dyn CommandRunner,
     clock: &'a dyn Clock,
+    github: &'a dyn GitHubClient,
     project_dir: &'a Utf8PathBuf,
     branch: &'a str,
 }
@@ -110,21 +114,13 @@ fn pr_number(context: &PrLookup<'_>) -> Option<PrNumber> {
         return None;
     }
 
-    let output = context
-        .runner
-        .run(
-            &crate::command::CommandSpec::new("gh")
-                .args(["pr", "view", "--json", "number", "--jq", ".number"])
-                .cwd(context.project_dir.clone()),
-        )
-        .ok()
-        .map(|out| out.stdout)
-        .unwrap_or_default();
-
-    let pr = if output.trim().is_empty() {
-        pr_from_branch(context.branch)
-    } else {
-        Some(PrNumber::new(output.trim().to_owned()))
+    let pr = match context
+        .github
+        .pr_number(context.project_dir, context.branch)
+    {
+        Ok(Some(value)) => Some(value),
+        Ok(None) => pr_from_branch(context.branch),
+        Err(_err) => pr_from_branch(context.branch),
     };
 
     if let Some(path) = cache_path.as_ref() {

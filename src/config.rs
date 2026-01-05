@@ -53,6 +53,9 @@ pub struct StatusArgs {
     /// Whether to attempt GitHub PR lookup.
     #[arg(long)]
     pub show_pr: Option<bool>,
+    /// Mock PR number for GitHub lookups (used in tests).
+    #[arg(long)]
+    pub github_mock_pr: Option<String>,
     /// Cache TTL for PR lookups, in seconds.
     #[ortho_config(default = CacheTtlSeconds::default())]
     #[arg(long, default_value_t = CacheTtlSeconds::default())]

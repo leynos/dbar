@@ -1,0 +1,5 @@
+---
+source: tests/e2e/status_snapshot.rs
+expression: text
+---
+#[fg=colour117,bg=colour24] project #[fg=colour24,bg=default]#[default]#[default] #[fg=colour114] main #[fg=colour114] #[default] #[fg=colour176] #42#[default]                                           #[fg=colour117] demo:1.%0#[default]
