@@ -2,6 +2,7 @@
 
 use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
+use directories::BaseDirs;
 use ortho_config::OrthoConfig;
 use ortho_config::SubcmdConfigMerge;
 use serde::{Deserialize, Serialize};
@@ -63,6 +64,7 @@ pub struct StatusArgs {
 /// Arguments for installing tmux configuration.
 pub struct InstallArgs {
     /// Path to the tmux configuration file to edit.
+    #[ortho_config(default = default_tmux_config_path())]
     #[arg(long)]
     pub path: Option<Utf8PathBuf>,
     /// Emit the snippet without writing it.
@@ -70,9 +72,18 @@ pub struct InstallArgs {
     #[arg(long)]
     pub dry_run: bool,
     /// Where to install the status segment (left or right).
-    #[ortho_config(default = StatusPosition::Right)]
+    #[ortho_config(default = StatusPosition::Left)]
     #[arg(long)]
     pub position: StatusPosition,
+}
+
+fn default_tmux_config_path() -> Utf8PathBuf {
+    let fallback = Utf8PathBuf::from(".tmux.conf");
+    let Some(base_dirs) = BaseDirs::new() else {
+        return fallback;
+    };
+    let path = base_dirs.home_dir().join(".tmux.conf");
+    Utf8PathBuf::from_path_buf(path).unwrap_or(fallback)
 }
 
 /// The merged command selected by the CLI.
