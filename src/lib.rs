@@ -5,6 +5,7 @@ mod command;
 mod config;
 mod error;
 mod git;
+mod github;
 mod install;
 mod render;
 mod status;
@@ -15,6 +16,7 @@ pub use crate::error::DbarError;
 
 use crate::command::RealCommandRunner;
 use crate::config::DbarCommand;
+use crate::github::{GhCliClient, GitHubClient, MockGitHubClient};
 use mockable::DefaultClock;
 
 /// Run the dbar CLI and print the requested output.
@@ -39,7 +41,13 @@ pub fn run() -> Result<(), DbarError> {
         DbarCommand::Status(args) => {
             let runner = RealCommandRunner;
             let clock = DefaultClock;
-            let line = status::build_status_line(&args, &runner, &clock)?;
+            let mock_client = args.github_mock_pr.as_deref().map(MockGitHubClient::new);
+            let gh_client = GhCliClient::new(&runner);
+            let github: &dyn GitHubClient = match mock_client.as_ref() {
+                Some(client) => client,
+                None => &gh_client,
+            };
+            let line = status::build_status_line(&args, &runner, &clock, github)?;
             println!("{line}");
         }
         DbarCommand::Install(args) => {

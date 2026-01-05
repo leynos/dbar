@@ -3,6 +3,7 @@
 use crate::git::GitStatus;
 use crate::tmux::TmuxContext;
 use crate::types::{PrNumber, ProjectName};
+use unicode_width::UnicodeWidthChar;
 
 const GLYPH_FADE_RIGHT: &str = "\u{e0c6}";
 const GLYPH_BRANCH: &str = "\u{f418}";
@@ -225,7 +226,7 @@ fn visible_width(value: &str) -> usize {
             skip_style(&mut chars);
             continue;
         }
-        width += 1;
+        width += UnicodeWidthChar::width(ch).unwrap_or(0);
     }
     width
 }
