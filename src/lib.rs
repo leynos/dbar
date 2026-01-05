@@ -43,7 +43,11 @@ pub fn run() -> Result<(), DbarError> {
             println!("{line}");
         }
         DbarCommand::Install(args) => {
-            let outcome = install::install(args.path, args.position, args.dry_run, args.full)?;
+            let path = args
+                .path
+                .or_else(|| Some(config::default_tmux_config_path()));
+            let position = args.position.unwrap_or_default();
+            let outcome = install::install(path, position, args.dry_run, args.full)?;
             if outcome.dry_run {
                 println!("Dry run for {}:", outcome.path);
                 println!("{}", outcome.snippet);

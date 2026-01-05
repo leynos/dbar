@@ -81,10 +81,10 @@ pub struct InstallArgs {
     /// Where to install the status segment (left or right).
     #[ortho_config(default = StatusPosition::Left)]
     #[arg(long)]
-    pub position: StatusPosition,
+    pub position: Option<StatusPosition>,
 }
 
-fn default_tmux_config_path() -> Utf8PathBuf {
+pub(crate) fn default_tmux_config_path() -> Utf8PathBuf {
     let fallback = Utf8PathBuf::from(".tmux.conf");
     let Some(base_dirs) = BaseDirs::new() else {
         return fallback;
