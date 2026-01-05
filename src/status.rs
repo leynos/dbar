@@ -65,12 +65,15 @@ pub fn build_status_line(
         },
     );
 
-    Ok(render::render_status_line(
-        &project,
-        git_status.as_ref(),
-        pr_number.as_ref(),
-        Some(&tmux_context),
-    ))
+    let render_context = render::RenderContext {
+        project: &project,
+        git_status: git_status.as_ref(),
+        pr_number: pr_number.as_ref(),
+        tmux: Some(&tmux_context),
+        client_width: args.client_width.map(usize::from),
+    };
+
+    Ok(render::render_status_line(&render_context))
 }
 
 struct PrLookup<'a> {

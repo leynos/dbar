@@ -29,6 +29,7 @@ const COLOUR_CHIP_DANGER: u8 = 203;
 ///
 /// ```rust,ignore
 /// use dbar::git::GitStatus;
+/// use dbar::render::RenderContext;
 /// use dbar::render::render_status_line;
 /// use dbar::tmux::TmuxContext;
 /// use dbar::types::{BranchName, ProjectName};
@@ -43,37 +44,54 @@ const COLOUR_CHIP_DANGER: u8 = 203;
 ///     behind: BehindCount::new(0),
 ///     is_worktree: false,
 /// };
-/// let line = render_status_line(&project, Some(&git), None, Some(&TmuxContext::default()));
+/// let context = RenderContext {
+///     project: &project,
+///     git_status: Some(&git),
+///     pr_number: None,
+///     tmux: Some(&TmuxContext::default()),
+///     client_width: None,
+/// };
+/// let line = render_status_line(&context);
 /// assert!(line.contains("main"));
 /// ```
-pub fn render_status_line(
-    project: &ProjectName,
-    git_status: Option<&GitStatus>,
-    pr_number: Option<&PrNumber>,
-    tmux: Option<&TmuxContext>,
-) -> String {
+pub struct RenderContext<'a> {
+    /// Project name rendered in the status line.
+    pub project: &'a ProjectName,
+    /// Optional git status data.
+    pub git_status: Option<&'a GitStatus>,
+    /// Optional PR number to render.
+    pub pr_number: Option<&'a PrNumber>,
+    /// Optional tmux metadata for the right segment.
+    pub tmux: Option<&'a TmuxContext>,
+    /// Optional tmux client width used for right alignment.
+    pub client_width: Option<usize>,
+}
+
+/// Render a tmux status line from the collected probe data.
+pub fn render_status_line(context: &RenderContext<'_>) -> String {
     let mut parts = Vec::new();
 
-    parts.push(render_project_segment(project));
+    parts.push(render_project_segment(context.project));
 
-    if let Some(status) = git_status {
+    if let Some(status) = context.git_status {
         parts.push(render_branch_segment(status));
         if status.is_worktree {
             parts.push(render_worktree_indicator());
         }
     }
 
-    if let Some(pr) = pr_number {
+    if let Some(pr) = context.pr_number {
         parts.push(render_pr_segment(pr));
     }
 
-    if let Some(tmux_context) = tmux
-        && let Some(segment) = render_tmux_segment(tmux_context)
-    {
-        parts.push(segment);
-    }
+    let left = parts.join(" ");
 
-    parts.join(" ")
+    let tmux_segment = context.tmux.and_then(render_tmux_segment);
+    match (context.client_width, tmux_segment) {
+        (Some(width), Some(segment)) => layout_with_width(&left, &segment, width),
+        (None, Some(segment)) => format!("{left} {segment}"),
+        (_, None) => left,
+    }
 }
 
 fn render_project_segment(project: &ProjectName) -> String {
@@ -184,6 +202,43 @@ fn render_tmux_segment(context: &TmuxContext) -> Option<String> {
     ))
 }
 
+fn layout_with_width(left: &str, right: &str, width: usize) -> String {
+    let left_len = visible_width(left);
+    let right_len = visible_width(right);
+    if width <= left_len + right_len + 1 {
+        return format!("{left} {right}");
+    }
+
+    let pad = width - left_len - right_len;
+    let mut output = String::with_capacity(left.len() + right.len() + pad);
+    output.push_str(left);
+    output.extend(std::iter::repeat_n(' ', pad));
+    output.push_str(right);
+    output
+}
+
+fn visible_width(value: &str) -> usize {
+    let mut width = 0;
+    let mut chars = value.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '#' && matches!(chars.peek(), Some('[')) {
+            skip_style(&mut chars);
+            continue;
+        }
+        width += 1;
+    }
+    width
+}
+
+fn skip_style(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    chars.next();
+    for next in chars.by_ref() {
+        if next == ']' {
+            break;
+        }
+    }
+}
+
 fn style(fg: Option<u8>, bg: Option<u8>) -> String {
     match (fg, bg) {
         (Some(foreground), Some(background)) => {
@@ -226,8 +281,21 @@ mod tests {
             socket: None,
         };
         let pr = PrNumber::new("17");
-        let line = render_status_line(&project, Some(&status), Some(&pr), Some(&tmux));
+        let context = RenderContext {
+            project: &project,
+            git_status: Some(&status),
+            pr_number: Some(&pr),
+            tmux: Some(&tmux),
+            client_width: None,
+        };
+        let line = render_status_line(&context);
         assert!(line.contains("main"));
         assert!(line.contains("#17"));
+    }
+
+    #[test]
+    fn layout_right_justifies_with_width() {
+        let output = layout_with_width("left", "right", 12);
+        assert_eq!(output, "left   right");
     }
 }
