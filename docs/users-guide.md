@@ -36,6 +36,9 @@ cargo run -- install --path ~/.tmux.conf --position left
 The install command defaults to `--path ~/.tmux.conf --position left` when no
 arguments are supplied.
 
+Use `--full` to include the client width in the status command and add a
+matching `status-left-length 999` (or `status-right-length 999`) directive.
+
 Use `--dry-run` to preview the snippet without writing to disk:
 
 ```sh
@@ -59,6 +62,9 @@ set -g status-right '#(dbar status \
 Tmux supports line continuations with trailing backslashes, so this snippet can
 be wrapped for readability.
 
+To right-align the tmux segment when a client width is supplied, append
+`--client-width "#{client_width}"` to the command.
+
 The tmux status line protocol and style tags are explained in
 `docs/tmux-statuslines-in-a-nutshell.md`.
 
@@ -76,6 +82,7 @@ Example `.dbar.toml`:
 [cmds.status]
 show_pr = false
 pr_cache_ttl_seconds = 60
+client_width = 120
 
 [cmds.install]
 position = "right"

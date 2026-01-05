@@ -43,7 +43,7 @@ pub fn run() -> Result<(), DbarError> {
             println!("{line}");
         }
         DbarCommand::Install(args) => {
-            let outcome = install::install(args.path, args.position, args.dry_run)?;
+            let outcome = install::install(args.path, args.position, args.dry_run, args.full)?;
             if outcome.dry_run {
                 println!("Dry run for {}:", outcome.path);
                 println!("{}", outcome.snippet);

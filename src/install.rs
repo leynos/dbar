@@ -51,7 +51,7 @@ pub enum InstallError {
 /// use dbar::install::install;
 /// use dbar::types::StatusPosition;
 ///
-/// let outcome = install(Some("~/.tmux.conf".into()), StatusPosition::Right, true)?;
+/// let outcome = install(Some("~/.tmux.conf".into()), StatusPosition::Right, true, false)?;
 /// assert!(outcome.dry_run);
 /// # Ok::<(), dbar::install::InstallError>(())
 /// ```
@@ -59,9 +59,10 @@ pub fn install(
     config_path_opt: Option<Utf8PathBuf>,
     position: StatusPosition,
     dry_run: bool,
+    full: bool,
 ) -> Result<InstallOutcome, InstallError> {
     let config_path = config_path_opt.ok_or(InstallError::MissingPath)?;
-    let snippet = build_snippet(position);
+    let snippet = build_snippet(position, full);
 
     let existing = match read_to_string(&config_path) {
         Ok(contents) => contents,
@@ -118,19 +119,27 @@ fn apply_snippet(existing: &str, snippet: &str) -> Result<(bool, String), Instal
     Ok((true, next))
 }
 
-fn build_snippet(position: StatusPosition) -> String {
+fn build_snippet(position: StatusPosition, full: bool) -> String {
     let target = match position {
         StatusPosition::Left => "status-left",
         StatusPosition::Right => "status-right",
     };
-    let command = concat!(
+    let mut command = String::from(concat!(
         "dbar status --project-dir \"#{pane_current_path}\" ",
         "--session \"#{session_name}\" ",
         "--window \"#{window_index}\" ",
         "--pane \"#{pane_id}\" ",
         "--socket \"#{socket_path}\""
-    );
-    format!("{MARKER_START}\nset -g {target} '#({command})'\n{MARKER_END}\n")
+    ));
+    if full {
+        command.push_str(" --client-width \"#{client_width}\"");
+    }
+    let length_line = if full {
+        format!("set -g {target}-length 999\n")
+    } else {
+        String::new()
+    };
+    format!("{MARKER_START}\nset -g {target} '#({command})'\n{length_line}{MARKER_END}\n")
 }
 
 fn backup_path_for(path: &Utf8Path) -> Utf8PathBuf {
@@ -176,8 +185,8 @@ mod tests {
         let initial = "set -g status on\n";
         write(&path, initial).expect("write config");
 
-        let outcome =
-            install(Some(path.clone()), StatusPosition::Right, false).expect("install snippet");
+        let outcome = install(Some(path.clone()), StatusPosition::Right, false, false)
+            .expect("install snippet");
         assert!(outcome.updated);
         assert!(outcome.backup_path.is_some());
 
@@ -191,9 +200,25 @@ mod tests {
         let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("tmux.conf"))
             .map_err(|_| InstallError::MissingFileName)
             .expect("tmux config path");
-        let _ = install(Some(path.clone()), StatusPosition::Right, false).expect("install snippet");
-        let second =
-            install(Some(path.clone()), StatusPosition::Right, false).expect("install snippet");
+        let _ = install(Some(path.clone()), StatusPosition::Right, false, false)
+            .expect("install snippet");
+        let second = install(Some(path.clone()), StatusPosition::Right, false, false)
+            .expect("install snippet");
         assert!(!second.updated);
+    }
+
+    #[rstest]
+    fn install_full_adds_client_width(temp_dir: TempDir) {
+        let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("tmux.conf"))
+            .map_err(|_| InstallError::MissingFileName)
+            .expect("tmux config path");
+        let outcome =
+            install(Some(path), StatusPosition::Left, true, true).expect("install snippet");
+        assert!(
+            outcome
+                .snippet
+                .contains("--client-width \"#{client_width}\"")
+        );
+        assert!(outcome.snippet.contains("status-left-length 999"));
     }
 }

@@ -35,6 +35,9 @@ pub struct StatusArgs {
     /// Override the project directory used for git probing.
     #[arg(long)]
     pub project_dir: Option<Utf8PathBuf>,
+    /// tmux client width used for right-aligned layout.
+    #[arg(long)]
+    pub client_width: Option<u16>,
     /// tmux session name, supplied by tmux formats.
     #[arg(long)]
     pub session: Option<String>,
@@ -71,6 +74,10 @@ pub struct InstallArgs {
     #[ortho_config(default = false)]
     #[arg(long)]
     pub dry_run: bool,
+    /// Install the full-width snippet with client width support.
+    #[ortho_config(default = false)]
+    #[arg(long)]
+    pub full: bool,
     /// Where to install the status segment (left or right).
     #[ortho_config(default = StatusPosition::Left)]
     #[arg(long)]
