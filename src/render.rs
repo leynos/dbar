@@ -13,6 +13,7 @@ const GLYPH_STAGED: &str = "\u{f457}";
 const GLYPH_AHEAD: &str = "\u{f432}";
 const GLYPH_BEHIND: &str = "\u{f433}";
 const GLYPH_CLEAN: &str = "\u{f42e}";
+const GLYPH_TMUX: &str = "\u{ebc8}";
 
 const COLOUR_PROJECT_BG: u8 = 24;
 const COLOUR_PROJECT_FG: u8 = 117;
@@ -171,25 +172,16 @@ fn render_tmux_segment(context: &TmuxContext) -> Option<String> {
     let session = context.session.as_ref()?;
     let window = context.window.as_deref().unwrap_or("-");
     let pane = context.pane.as_deref().unwrap_or("-");
-    let socket_hint = context.socket.as_ref().map(|value| socket_hint(value));
 
-    let mut label = format!("{session}:{window}.{pane}");
-    if let Some(socket) = socket_hint {
-        label.push('@');
-        label.push_str(&socket);
-    }
+    let label = format!("{session}:{window}.{pane}");
 
     Some(format!(
         "{}{} {}{}",
         style(Some(COLOUR_PROJECT_FG), None),
-        GLYPH_CHIP,
+        GLYPH_TMUX,
         label,
         reset()
     ))
-}
-
-fn socket_hint(socket: &str) -> String {
-    socket.rsplit('/').next().unwrap_or(socket).to_owned()
 }
 
 fn style(fg: Option<u8>, bg: Option<u8>) -> String {
