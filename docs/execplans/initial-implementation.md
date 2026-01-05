@@ -4,7 +4,7 @@ This ExecPlan is a living document. The sections `Constraints`, `Tolerances`,
 `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`, and
 `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
-Status: IN PROGRESS
+Status: COMPLETE
 
 No `PLANS.md` exists in this repository, so this document is the source of
 truth for the plan.
@@ -84,11 +84,12 @@ in tmux via `#(dbar)` and all specified tests pass.
   formatting behaviour.
 - [x] (2026-01-05 00:00Z) Reviewed tmux status line protocol guidance.
 - [x] (2026-01-05 00:00Z) Plan approved; implementation started.
-- [ ] Design configuration schema and CLI contract with `ortho_config`.
-- [ ] Build core status model and renderer with test scaffolding.
-- [ ] Add unit, BDD, and e2e snapshot tests.
-- [ ] Update documentation for tmux usage and configuration.
-- [ ] Run formatting, lint, and test gates; commit changes.
+- [x] (2026-01-05 00:00Z) Designed configuration schema and CLI contract.
+- [x] (2026-01-05 00:00Z) Built core status model and renderer scaffolding.
+- [x] Add unit, BDD, and e2e snapshot tests.
+- [x] Update documentation for tmux usage and configuration.
+- [x] Run formatting, lint, and test gates.
+- [x] Commit changes.
 
 ## Surprises & Discoveries
 
@@ -101,6 +102,21 @@ in tmux via `#(dbar)` and all specified tests pass.
   `docs/tmux-statuslines-in-a-nutshell.md`. Evidence:
   `MD036/no-emphasis-as-heading` errors for two bolded lines. Impact: convert
   the bolded lines to headings before proceeding.
+
+- Observation: cargo registry writes required elevated permissions.
+  Evidence: `cargo check` failed with permission errors until rerun with
+  escalated access to `/home/leynos/.cargo`. Impact: use escalated permissions
+  for build and test gates if needed.
+
+- Observation: integration tests under nested `tests/` directories were not
+  discovered by Cargo. Evidence: `cargo test` only ran unit tests until
+  top-level test crates were added. Impact: add `tests/e2e_tests.rs` and
+  `tests/rstest_bdd_tests.rs` to load the submodules.
+
+- Observation: the CLI treated `pr_cache_ttl_seconds` as required after adding
+  explicit long flags. Evidence: e2e tests failed with a missing
+  `--pr-cache-ttl-seconds` error. Impact: set a clap default value for the
+  field.
 
 ## Decision Log
 
@@ -118,9 +134,21 @@ in tmux via `#(dbar)` and all specified tests pass.
   formatting requirements and avoids manual rollback. Date/Author: 2026-01-05 /
   Codex
 
+- Decision: add an explicit `clap` dependency to satisfy `ortho_config`'s
+  generated CLI parsing requirements. Rationale: the derive macros require
+  `clap` to be available in the crate. Date/Author: 2026-01-05 / Codex
+
+- Decision: add explicit clap long flags and a default for
+  `pr_cache_ttl_seconds`. Rationale: keep the CLI optional arguments optional
+  and avoid missing-argument failures in tests. Date/Author: 2026-01-05 / Codex
+
 ## Outcomes & Retrospective
 
-To be completed after implementation.
+Implemented a tmux status line renderer with install support, git metadata, PR
+lookup caching, and tmux context probing. Added unit tests, rstest-bdd
+behavioural coverage, and insta snapshot tests. Updated documentation and
+validated formatting, linting, and tests. Next time, scaffold integration test
+crate roots earlier to avoid missing coverage during initial test runs.
 
 ## Context and Orientation
 
@@ -287,9 +315,9 @@ Proposed core interfaces (final names may adjust to fit codebase):
 Planned dependencies (subject to `cargo search` for versions):
 
 - runtime: `ortho_config`, `serde`, `serde_json`, `camino`, `cap-std`,
-  `thiserror`, `directories`
-- dev: `rstest`, `rstest-bdd`, `rstest-bdd-macros`, `mockable`, `mockall`,
-  `assert_cmd`, `insta`, `tempfile`, `predicates`
+  `thiserror`, `directories`, `mockable`, `clap`
+- dev: `rstest`, `rstest-bdd`, `rstest-bdd-macros`, `mockall`, `assert_cmd`,
+  `insta`, `tempfile`, `predicates`
 
 ## Revision note (required when editing an ExecPlan)
 
@@ -301,3 +329,11 @@ Revised 2026-01-05 to incorporate tmux status line protocol guidance, add the
 `directories` crate.
 
 Revised 2026-01-05 to mark the plan as in progress after approval.
+
+Revised 2026-01-05 to record scaffolding progress, cargo permission
+discoveries, and the added `clap` dependency.
+
+Revised 2026-01-05 to capture integration test discovery, clap defaults, and
+progress updates.
+
+Revised 2026-01-05 to mark the plan complete with final outcomes.
