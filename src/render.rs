@@ -15,6 +15,7 @@ const GLYPH_AHEAD: &str = "\u{f432}";
 const GLYPH_BEHIND: &str = "\u{f433}";
 const GLYPH_CLEAN: &str = "\u{f42e}";
 const GLYPH_TMUX: &str = "\u{ebc8}";
+const GLYPH_CLOCK: &str = "\u{f017}";
 
 const COLOUR_PROJECT_BG: u8 = 24;
 const COLOUR_PROJECT_FG: u8 = 117;
@@ -50,6 +51,7 @@ const COLOUR_CHIP_DANGER: u8 = 203;
 ///     git_status: Some(&git),
 ///     pr_number: None,
 ///     tmux: Some(&TmuxContext::default()),
+///     clock: None,
 ///     client_width: None,
 /// };
 /// let line = render_status_line(&context);
@@ -64,6 +66,8 @@ pub struct RenderContext<'a> {
     pub pr_number: Option<&'a PrNumber>,
     /// Optional tmux metadata for the right segment.
     pub tmux: Option<&'a TmuxContext>,
+    /// Optional clock label for the final right segment.
+    pub clock: Option<&'a str>,
     /// Optional tmux client width used for right alignment.
     pub client_width: Option<usize>,
 }
@@ -87,11 +91,26 @@ pub fn render_status_line(context: &RenderContext<'_>) -> String {
 
     let left = parts.join(" ");
 
-    let tmux_segment = context.tmux.and_then(render_tmux_segment);
-    match (context.client_width, tmux_segment) {
+    let right = render_right_segment(context);
+    match (context.client_width, right) {
         (Some(width), Some(segment)) => layout_with_width(&left, &segment, width),
         (None, Some(segment)) => format!("{left} {segment}"),
         (_, None) => left,
+    }
+}
+
+fn render_right_segment(context: &RenderContext<'_>) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(segment) = context.tmux.and_then(render_tmux_segment) {
+        parts.push(segment);
+    }
+    if let Some(clock) = context.clock {
+        parts.push(render_clock_segment(clock));
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" "))
     }
 }
 
@@ -203,6 +222,16 @@ fn render_tmux_segment(context: &TmuxContext) -> Option<String> {
     ))
 }
 
+fn render_clock_segment(clock: &str) -> String {
+    format!(
+        "{}{} {}{}",
+        style(Some(COLOUR_PROJECT_FG), None),
+        GLYPH_CLOCK,
+        clock,
+        reset()
+    )
+}
+
 fn layout_with_width(left: &str, right: &str, width: usize) -> String {
     let left_len = visible_width(left);
     let right_len = visible_width(right);
@@ -287,6 +316,7 @@ mod tests {
             git_status: Some(&status),
             pr_number: Some(&pr),
             tmux: Some(&tmux),
+            clock: None,
             client_width: None,
         };
         let line = render_status_line(&context);
@@ -298,5 +328,27 @@ mod tests {
     fn layout_right_justifies_with_width() {
         let output = layout_with_width("left", "right", 12);
         assert_eq!(output, "left   right");
+    }
+
+    #[test]
+    fn render_places_clock_after_tmux_on_right() {
+        let project = ProjectName::new("demo");
+        let tmux = TmuxContext {
+            session: Some("session".into()),
+            window: Some("1".into()),
+            pane: Some("%0".into()),
+            socket: None,
+        };
+        let context = RenderContext {
+            project: &project,
+            git_status: None,
+            pr_number: None,
+            tmux: Some(&tmux),
+            clock: Some("09:41"),
+            client_width: None,
+        };
+        let line = render_status_line(&context);
+        assert!(line.contains("session:1.%0"));
+        assert!(line.ends_with(" 09:41#[default]"));
     }
 }

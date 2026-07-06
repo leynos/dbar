@@ -68,12 +68,14 @@ pub fn build_status_line(
             socket: args.socket.clone(),
         },
     );
+    let clock_label = render_clock(args, clock);
 
     let render_context = render::RenderContext {
         project: &project,
         git_status: git_status.as_ref(),
         pr_number: pr_number.as_ref(),
         tmux: Some(&tmux_context),
+        clock: clock_label.as_deref(),
         client_width: args.client_width.map(usize::from),
     };
 
@@ -96,6 +98,12 @@ fn resolve_project_dir(args: &StatusArgs) -> Result<Utf8PathBuf, DbarError> {
     let path = Utf8PathBuf::from_path_buf(current)
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, "current directory is not UTF-8"))?;
     Ok(path)
+}
+
+fn render_clock(args: &StatusArgs, clock: &dyn Clock) -> Option<String> {
+    args.show_clock
+        .unwrap_or(false)
+        .then(|| clock.local().format(&args.clock_format).to_string())
 }
 
 fn pr_number(context: &PrLookup<'_>) -> Option<PrNumber> {

@@ -131,6 +131,9 @@ fn build_snippet(position: StatusPosition, full: bool) -> String {
         "--pane \"#{pane_id}\" ",
         "--socket \"#{socket_path}\""
     ));
+    if matches!(position, StatusPosition::Right) {
+        command.push_str(" --show-clock true");
+    }
     if full {
         command.push_str(" --client-width \"#{client_width}\"");
     }
@@ -220,5 +223,26 @@ mod tests {
                 .contains("--client-width \"#{client_width}\"")
         );
         assert!(outcome.snippet.contains("status-left-length 999"));
+    }
+
+    #[rstest]
+    fn install_right_enables_clock(temp_dir: TempDir) {
+        let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("tmux.conf"))
+            .map_err(|_| InstallError::MissingFileName)
+            .expect("tmux config path");
+        let outcome =
+            install(Some(path), StatusPosition::Right, true, false).expect("install snippet");
+        assert!(outcome.snippet.contains("--show-clock true"));
+        assert!(outcome.snippet.contains("status-right"));
+    }
+
+    #[rstest]
+    fn install_left_omits_clock(temp_dir: TempDir) {
+        let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("tmux.conf"))
+            .map_err(|_| InstallError::MissingFileName)
+            .expect("tmux config path");
+        let outcome =
+            install(Some(path), StatusPosition::Left, true, false).expect("install snippet");
+        assert!(!outcome.snippet.contains("--show-clock true"));
     }
 }
