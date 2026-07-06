@@ -4,8 +4,8 @@
 
 dbar renders a tmux-friendly status segment that shows the current project
 name, git branch and status, upstream divergence, pull request number, worktree
-indicator, and tmux session details. It outputs tmux `#[...]` style tags so it
-can be embedded directly in the tmux status line.
+indicator, tmux session details, and an optional clock. It outputs tmux
+`#[...]` style tags so it can be embedded directly in the tmux status line.
 
 ## Quick start
 
@@ -38,6 +38,8 @@ arguments are supplied.
 
 Use `--full` to include the client width in the status command and add a
 matching `status-left-length 999` (or `status-right-length 999`) directive.
+Installing with `--position right` also enables the clock by passing
+`--show-clock true` to the status command.
 
 Use `--dry-run` to preview the snippet without writing to disk:
 
@@ -56,7 +58,8 @@ set -g status-right '#(dbar status \
   --session "#{session_name}" \
   --window "#{window_index}" \
   --pane "#{pane_id}" \
-  --socket "#{socket_path}")'
+  --socket "#{socket_path}" \
+  --show-clock true)'
 ```
 
 Tmux supports line continuations with trailing backslashes, so this snippet can
@@ -81,6 +84,8 @@ Example `.dbar.toml`:
 ```toml
 [cmds.status]
 show_pr = false
+show_clock = true
+clock_format = "%H:%M"
 pr_cache_ttl_seconds = 60
 client_width = 120
 

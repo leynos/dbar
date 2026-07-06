@@ -15,8 +15,8 @@ by tmux formats and configured with `ortho_config`.
 - GitHub PR number rendering with caching.
 - Worktree indicator and tmux session info.
 - `install` subcommand that inserts an idempotent tmux snippet.
-- Client-width-aware layout to right-align the tmux segment.
-
+- Optional clock rendering in the right-hand segment.
+- Client-width-aware layout to right-align the tmux and clock segment.
 
 ## Quick start
 
@@ -62,6 +62,11 @@ cargo run -- install --full
 
 or append `--client-width "#{client_width}"` to the manual snippet.
 
+Installing to `status-right` enables the clock automatically:
+
+```sh
+cargo run -- install --position right
+```
 
 ## Configuration
 
@@ -72,6 +77,8 @@ environment variables (`DBAR_*`), or CLI flags. Subcommand config lives under
 ```toml
 [cmds.status]
 show_pr = false
+show_clock = true
+clock_format = "%H:%M"
 pr_cache_ttl_seconds = 60
 client_width = 120
 
@@ -79,7 +86,6 @@ client_width = 120
 position = "left"
 full = true
 ```
-
 
 ## Development
 

@@ -53,6 +53,13 @@ pub struct StatusArgs {
     /// Whether to attempt GitHub PR lookup.
     #[arg(long)]
     pub show_pr: Option<bool>,
+    /// Whether to render a clock in the right-hand status segment.
+    #[arg(long)]
+    pub show_clock: Option<bool>,
+    /// Clock format string, using chrono strftime syntax.
+    #[ortho_config(default = default_clock_format())]
+    #[arg(long, default_value_t = default_clock_format())]
+    pub clock_format: String,
     /// Mock PR number for GitHub lookups (used in tests).
     #[arg(long)]
     pub github_mock_pr: Option<String>,
@@ -94,6 +101,10 @@ pub(crate) fn default_tmux_config_path() -> Utf8PathBuf {
     };
     let path = base_dirs.home_dir().join(".tmux.conf");
     Utf8PathBuf::from_path_buf(path).unwrap_or(fallback)
+}
+
+fn default_clock_format() -> String {
+    "%H:%M".to_owned()
 }
 
 /// The merged command selected by the CLI.
