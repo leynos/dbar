@@ -118,6 +118,14 @@ in tmux via `#(dbar)` and all specified tests pass.
   `--pr-cache-ttl-seconds` error. Impact: set a clap default value for the
   field.
 
+- Observation: rebasing onto `origin/main` applied two new commits
+  (`dependabot-automerge` rollout and the cooldown fix), neither of which
+  touched the same lines as the implementation branch. Evidence: `git rebase
+  origin/main` completed without conflicts. Impact: pick up the new shared
+  Dependabot workflow automatically and inherit the `cooldown` policy; the
+  branch now relies on the project's standard lock-file policy rather than
+  carrying its own.
+
 ## Decision Log
 
 - Decision: plan to emit tmux style codes (not ANSI) while using the same
@@ -144,8 +152,15 @@ in tmux via `#(dbar)` and all specified tests pass.
 
 - Decision: wire tmux `pane_current_path` into the install snippet to scope
   git probes to the active pane directory. Rationale: ensures branch and
-  project context match the shell running inside tmux. Date/Author: 2026-01-05
+  project context match the shell running inside tmux. Date/Author: **********
   / Codex
+
+- Decision: do not track `Cargo.lock` in version control. Rationale: after the
+  rebase onto `origin/main`, the merged project policy is to keep `Cargo.lock`
+  out of the tree, regenerating it locally via `cargo build` or
+  `cargo generate-lockfile`. The branch untracks the lock, adds `/Cargo.lock`
+  to `.gitignore`, and keeps a fresh lock file on disk for the local working
+  copy. Date/Author: 2026-07-08 / Codex
 
 ## Outcomes & Retrospective
 
@@ -154,6 +169,11 @@ lookup caching, and tmux context probing. Added unit tests, rstest-bdd
 behavioural coverage, and insta snapshot tests. Updated documentation and
 validated formatting, linting, and tests. Next time, scaffold integration test
 crate roots earlier to avoid missing coverage during initial test runs.
+
+Followed up with a rebase onto `origin/main` so the branch inherits the new
+`dependabot-automerge` workflow and the cooler-aware `dependabot.yml`.
+Validated `make check-fmt`, `make lint`, and `make test` after the rebase and
+removed `Cargo.lock` from tracking to match the merged project policy.
 
 ## Context and Orientation
 
