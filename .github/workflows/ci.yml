@@ -38,10 +38,10 @@ jobs:
         run: |
           if ! command -v whitaker-installer >/dev/null 2>&1; then
             if cargo binstall --version >/dev/null 2>&1; then
-              cargo binstall --no-confirm whitaker-installer@${{ env.WHITAKER_INSTALLER_VERSION }}
+              cargo binstall --no-confirm --locked "whitaker-installer@${WHITAKER_INSTALLER_VERSION}"
             else
               echo "cargo-binstall unavailable; building whitaker-installer from crates.io"
-              cargo install --locked whitaker-installer --version ${{ env.WHITAKER_INSTALLER_VERSION }}
+              cargo install --locked whitaker-installer --version "${WHITAKER_INSTALLER_VERSION}"
             fi
           fi
           whitaker-installer
