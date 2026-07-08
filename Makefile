@@ -30,7 +30,7 @@ target/%/$(TARGET): ## Build binary in debug or release mode
 lint: ## Run Clippy and the Whitaker Dylint suite with warnings denied
 	RUSTDOCFLAGS="$(RUSTDOC_FLAGS)" $(CARGO) doc --no-deps
 	$(CARGO) clippy $(CLIPPY_FLAGS)
-	RUSTFLAGS="$(RUST_FLAGS)" $(WHITAKER) --all -- --all-targets --all-features
+	RUSTFLAGS="$(RUST_FLAGS)" $(WHITAKER) --all -- $(CARGO_FLAGS)
 
 fmt: ## Format Rust and Markdown sources
 	$(CARGO) fmt --all
