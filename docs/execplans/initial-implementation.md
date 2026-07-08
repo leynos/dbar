@@ -123,8 +123,8 @@ in tmux via `#(dbar)` and all specified tests pass.
   touched the same lines as the implementation branch. Evidence: `git rebase
   origin/main` completed without conflicts. Impact: pick up the new shared
   Dependabot workflow automatically and inherit the `cooldown` policy; the
-  branch now relies on the project's standard lock-file policy rather than
-  carrying its own.
+  branch rebuilds `Cargo.lock` against the merged `Cargo.toml` and keeps the
+  lock file tracked so reproducible builds stay available.
 
 ## Decision Log
 
@@ -155,12 +155,13 @@ in tmux via `#(dbar)` and all specified tests pass.
   project context match the shell running inside tmux. Date/Author: **********
   / Codex
 
-- Decision: do not track `Cargo.lock` in version control. Rationale: after the
-  rebase onto `origin/main`, the merged project policy is to keep `Cargo.lock`
-  out of the tree, regenerating it locally via `cargo build` or
-  `cargo generate-lockfile`. The branch untracks the lock, adds `/Cargo.lock`
-  to `.gitignore`, and keeps a fresh lock file on disk for the local working
-  copy. Date/Author: 2026-07-08 / Codex
+- Decision: track `Cargo.lock` and rebuild it after the rebase. Rationale:
+  after rebasing onto `origin/main`, the `Cargo.toml` dependencies are
+  inherited from the branch implementation; track `Cargo.lock` so dependency
+  resolutions stay reproducible for reviewers and CI, and regenerate the
+  lock against the merged `Cargo.toml` via `cargo generate-lockfile` so the
+  committed lock reflects the post-rebase state. Date/Author: 2026-07-08 /
+  Codex
 
 ## Outcomes & Retrospective
 
@@ -172,8 +173,10 @@ crate roots earlier to avoid missing coverage during initial test runs.
 
 Followed up with a rebase onto `origin/main` so the branch inherits the new
 `dependabot-automerge` workflow and the cooler-aware `dependabot.yml`.
-Validated `make check-fmt`, `make lint`, and `make test` after the rebase and
-removed `Cargo.lock` from tracking to match the merged project policy.
+Validated `make check-fmt`, `make lint`, and `make test` after the rebase.
+The lock file is now kept under version control and was regenerated against
+the merged `Cargo.toml` so the committed `Cargo.lock` matches the
+post-rebase dependency set.
 
 ## Context and Orientation
 

@@ -5,4 +5,3 @@ target/
 __pycache__/
 .typos-oxendict-base.json
 .typos-oxendict-base.toml
-/Cargo.lock
