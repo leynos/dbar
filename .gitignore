@@ -1,2 +1,7 @@
 target/
 **/*.rs.bk
+.coverage
+.pytest_cache/
+__pycache__/
+.typos-oxendict-base.json
+.typos-oxendict-base.toml

@@ -1,0 +1,18 @@
+# Repository-specific identifiers, quotations and deliberate fixtures.
+
+schema = 1
+
+[oxford]
+stems = []
+
+[words]
+# Microsoft product title: "Azure Architecture Center".
+accepted = ["Center"]
+
+[words.corrections]
+
+[patterns]
+ignore = []
+
+[files]
+exclude = []
