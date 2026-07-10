@@ -46,8 +46,8 @@ the number of edges, N is the number of nodes, and P is the number of connected
 components (typically 1 for a single program or method).[^3] A simpler
 formulation applies to a single subroutine:
 
-M = number of decision points + 1, where decision points include constructs
-like `if` statements and conditional loops.[^3]
+M = number of decision points + 1, where decision points include constructs like
+`if` statements and conditional loops.[^3]
 
 Thresholds and Implications:
 
@@ -85,9 +85,9 @@ Core Principles of Calculation:
 Cognitive Complexity is incremented based on three main rules[^8]:
 
 1. **Breaks in Linear Flow:** Each time the code breaks the normal linear
-   reading flow (e.g., loops, conditionals like
-   `if`/`else`/`switch`, `try-catch` blocks, jumps to labels, and sequences of
-   logical operators like `&&` and `||`), a penalty is applied.
+   reading flow (e.g., loops, conditionals like `if`/`else`/`switch`,
+   `try-catch` blocks, jumps to labels, and sequences of logical operators like
+   `&&` and `||`), a penalty is applied.
 
 2. **Nesting:** Each level of nesting of these flow-breaking structures adds an
    additional penalty. This is because deeper nesting makes it harder to keep
@@ -111,7 +111,7 @@ Thresholds and Implications:
 
 Code with high Cognitive Complexity is harder to read, understand, test, and
 modify.[^8] SonarQube, for example, raises issues when a function's Cognitive
-Complexity exceeds a certain threshold, signaling that the code should likely
+Complexity exceeds a certain threshold, signalling that the code should likely
 be refactored into smaller, more manageable pieces.[^8] The primary impact of
 high Cognitive Complexity is a slowdown in development and an increase in
 maintenance costs.[^8]
@@ -198,14 +198,14 @@ attention, much like a physical bumpy road slows down driving.[^9]
 ### B. How it forms and its impact
 
 The Bumpy Road antipattern, like many software antipatterns, often emerges from
-development practices that prioritize short-term speed over long-term
-structural integrity.[^2] Rushed development cycles, lack of clear design, or
-cutting corners on maintenance can lead to the gradual accumulation of
-conditional logic within a single function.[^2] As new requirements emerge
-alongside additional edge cases, developers might add conditional branches to
-an existing method. Examples include an `if` statement, a loop, or a deeply
-nested match added in haste when a team could instead step back to refactor and
-create appropriate abstractions.
+development practices that prioritize short-term speed over long-term structural
+integrity.[^2] Rushed development cycles, lack of clear design, or cutting
+corners on maintenance can lead to the gradual accumulation of conditional
+logic within a single function.[^2] As new requirements emerge alongside
+additional edge cases, developers might add conditional branches to an existing
+method. Examples include an `if` statement, a loop, or a deeply nested match
+added in haste when a team could instead step back to refactor and create
+appropriate abstractions.
 
 The impact of this antipattern is significant:
 
@@ -393,10 +393,10 @@ maintainable systems.
 1\. Separation of Concerns (SoC)
 
 Separation of Concerns is a design principle that advocates for dividing a
-computer program into distinct sections, where each section addresses a
-separate concern.[^13] A "concern" is a set of information that affects the
-code of a computer program. Modularity is achieved by encapsulating information
-within a section of code that has a well-defined interface.[^13]
+computer program into distinct sections, where each section addresses a separate
+concern.[^13] A "concern" is a set of information that affects the code of a
+computer program. Modularity is achieved by encapsulating information within a
+section of code that has a well-defined interface.[^13]
 
 The Bumpy Road antipattern is a direct violation of SoC. Each "bump" in the
 code often represents a distinct concern, or responsibility, that has been
@@ -471,10 +471,10 @@ Command Query Responsibility Segregation promotes a clear separation that can
 prevent the kind of tangled logic that forms Bumpy Roads. By isolating write
 operations (commands) from read operations (queries), and by encouraging
 task-based commands, the system naturally tends towards smaller, more cohesive
-units of behaviour, thus reducing overall cognitive complexity within
-individual components.[^14] The separation allows for independent optimization
-and scaling of read and write sides, but more importantly for this discussion,
-it enforces a structural discipline that discourages methods from accumulating
+units of behaviour, thus reducing overall cognitive complexity within individual
+components.[^14] The separation allows for independent optimization and
+scaling of read and write sides, but more importantly for this discussion, it
+enforces a structural discipline that discourages methods from accumulating
 diverse responsibilities.[^14]
 
 ### B. Avoiding spaghetti code turning into ravioli code

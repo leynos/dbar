@@ -489,10 +489,10 @@ resulting in environment variables such as `APP_DB_URL`. The `features` field
 is a `Vec<String>` and accumulates values from multiple sources rather than
 overwriting them.
 
-### Customising configuration discovery
+### Customizing configuration discovery
 
 Configuration discovery can be tailored per struct using the `discovery(...)`
-attribute. The keys recognised today include:
+attribute. The keys recognized today include:
 
 - `app_name`: directory name used under XDG and application data folders.
 - `env_var`: override for the environment variable consulted before discovery
@@ -560,11 +560,11 @@ following steps:
 
 ### Config path override
 
-The derive macro always recognises a configuration override flag and the
+The derive macro always recognizes a configuration override flag and the
 associated environment variables even when you do not declare a field
 explicitly. By default a hidden `--config-path` flag is accepted alongside
 `<PREFIX>CONFIG_PATH` and the unprefixed `CONFIG_PATH`. Applying the
-struct-level `discovery(...)` attribute customises this behaviour, allowing you
+struct-level `discovery(...)` attribute customizes this behaviour, allowing you
 to rename or expose the CLI flag and adjust the filenames searched during
 discovery:
 
@@ -840,8 +840,8 @@ and environment variables before applying CLI overrides. When callers pass
 replaces file or environment values. The `greet` subcommand adds optional
 behaviour like a preamble (`--preamble "Good morning"`) or custom punctuation
 while reusing the merged global configuration. The `take-leave` subcommand
-combines switches and optional arguments (`--wave`, `--gift`,
-`--channel email`, `--remind-in 15`) alongside greeting adjustments
+combines switches and optional arguments (`--wave`, `--gift`, `--channel email`,
+`--remind-in 15`) alongside greeting adjustments
 (`--preamble "Until next time"`, `--punctuation ?`) to describe how the
 farewell should unfold. Each subcommand struct derives `OrthoConfig` so
 defaults from `[cmds.greet]` or `[cmds.take-leave]` merge automatically when
@@ -921,17 +921,16 @@ for a complete example.
 
 ## Error handling
 
-`load` and `load_and_merge_subcommand_for` return `OrthoResult<T>`, an alias
-for `Result<T, Arc<OrthoError>>`. `OrthoError` wraps errors from `clap`, file
-I/O and `figment`. Failures during the final merge of CLI values over
-configuration sources surface as the `Merge` variant, providing clearer
-diagnostics when the combined data is invalid. When multiple sources fail, the
-errors are collected into the `Aggregate` variant so callers can inspect each
-individual failure. Consumers should handle these errors appropriately, for
-example by printing them to stderr and exiting. If required fields are missing
-after merging, the crate returns `OrthoError::MissingRequiredValues` with a
-user‑friendly list of missing paths and hints on how to provide them. For
-example:
+`load` and `load_and_merge_subcommand_for` return `OrthoResult<T>`, an alias for
+`Result<T, Arc<OrthoError>>`. `OrthoError` wraps errors from `clap`, file I/O
+and `figment`. Failures during the final merge of CLI values over configuration
+sources surface as the `Merge` variant, providing clearer diagnostics when the
+combined data is invalid. When multiple sources fail, the errors are collected
+into the `Aggregate` variant so callers can inspect each individual failure.
+Consumers should handle these errors appropriately, for example by printing
+them to stderr and exiting. If required fields are missing after merging, the
+crate returns `OrthoError::MissingRequiredValues` with a user‑friendly list of
+missing paths and hints on how to provide them. For example:
 
 ```plaintext
 Missing required values:
@@ -940,7 +939,7 @@ Missing required values:
 
 ### Preserving `clap` display exits
 
-When a user passes `--help` or `--version`, `clap` surfaces specialised
+When a user passes `--help` or `--version`, `clap` surfaces specialized
 `ErrorKind::DisplayHelp` / `DisplayVersion` errors so applications can print
 usage text and exit successfully. Deriving `OrthoConfig` often goes hand in
 hand with `Cli::try_parse()` so applications can map errors into their own

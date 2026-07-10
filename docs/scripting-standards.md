@@ -495,3 +495,16 @@ def test_spy_and_record(cmd_mox, monkeypatch, tmp_path):
 
 This document should be referenced when introducing or updating automation
 scripts to maintain a consistent developer experience across the repository.
+
+## Spelling policy
+
+The lint and Markdown gates run pinned `typos` 1.48.0 with British English and
+Oxford `-ize` conventions. Before checking maintained Markdown, the generator
+refreshes the shared estate dictionary into an untracked local cache only when
+the authority is newer, then merges `typos.local.toml`. The generated
+`typos.toml` is reviewed and committed so a clean, network-restricted checkout
+can still enforce the last known-good policy.
+
+Add repository-only proper names or quoted upstream terms to
+`typos.local.toml`; never edit generated entries in `typos.toml` by hand. The
+gate also runs the helper's Python 3.13 tests with at least 90% line coverage.
