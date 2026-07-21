@@ -310,7 +310,7 @@ All steps are additive. If a step fails, fix the issue and re-run the same
 command. Avoid destructive git operations. Keep temporary test repos confined
 to temp directories created per test and cleaned automatically by `tempfile`.
 
-## Artifacts and Notes
+## Artefacts and Notes
 
 Expected tmux usage snippet (final doc should include something like this):
 

@@ -1,5 +1,6 @@
 //! Snapshot coverage for the status line output.
 
+use std::io;
 use std::process::Command;
 
 use camino::Utf8PathBuf;
@@ -7,13 +8,13 @@ use tempfile::TempDir;
 
 #[test]
 fn status_snapshot_without_git() {
-    let temp_dir = TempDir::new().unwrap_or_else(|err| panic!("temp dir: {err}"));
+    let temp_dir = TempDir::new().expect("temp dir");
     let temp_dir_path = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
-        .unwrap_or_else(|_| panic!("temp dir path is not utf8"));
+        .expect("temp dir path is not utf8");
     let project_dir = temp_dir_path.join("project");
     cap_std::fs_utf8::Dir::open_ambient_dir(temp_dir_path.as_path(), cap_std::ambient_authority())
         .and_then(|dir| dir.create_dir("project"))
-        .unwrap_or_else(|err| panic!("create project dir: {err}"));
+        .expect("create project dir");
 
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("dbar");
     cmd.args([
@@ -38,13 +39,13 @@ fn status_snapshot_without_git() {
 
 #[test]
 fn status_renders_configured_clock() {
-    let temp_dir = TempDir::new().unwrap_or_else(|err| panic!("temp dir: {err}"));
+    let temp_dir = TempDir::new().expect("temp dir");
     let temp_dir_path = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
-        .unwrap_or_else(|_| panic!("temp dir path is not utf8"));
+        .expect("temp dir path is not utf8");
     let project_dir = temp_dir_path.join("project");
     cap_std::fs_utf8::Dir::open_ambient_dir(temp_dir_path.as_path(), cap_std::ambient_authority())
         .and_then(|dir| dir.create_dir("project"))
-        .unwrap_or_else(|err| panic!("create project dir: {err}"));
+        .expect("create project dir");
 
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("dbar");
     cmd.args([
@@ -71,9 +72,9 @@ fn status_renders_configured_clock() {
 
 #[test]
 fn status_snapshot_clean_git_full_width_with_pr() {
-    let temp_dir = TempDir::new().unwrap_or_else(|err| panic!("temp dir: {err}"));
-    let repo_dir = create_repo_dir(&temp_dir);
-    init_repo(&repo_dir);
+    let temp_dir = TempDir::new().expect("temp dir");
+    let repo_dir = create_repo_dir(&temp_dir).expect("create repo dir");
+    init_repo(&repo_dir).expect("init repo");
 
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("dbar");
     cmd.args([
@@ -102,10 +103,10 @@ fn status_snapshot_clean_git_full_width_with_pr() {
 
 #[test]
 fn status_snapshot_dirty_git_default_width() {
-    let temp_dir = TempDir::new().unwrap_or_else(|err| panic!("temp dir: {err}"));
-    let repo_dir = create_repo_dir(&temp_dir);
-    init_repo(&repo_dir);
-    mark_repo_dirty(&repo_dir);
+    let temp_dir = TempDir::new().expect("temp dir");
+    let repo_dir = create_repo_dir(&temp_dir).expect("create repo dir");
+    init_repo(&repo_dir).expect("init repo");
+    mark_repo_dirty(&repo_dir).expect("mark repo dirty");
 
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("dbar");
     cmd.args([
@@ -128,10 +129,10 @@ fn status_snapshot_dirty_git_default_width() {
     insta::assert_snapshot!(text);
 }
 
-fn init_repo(path: &Utf8PathBuf) {
-    run_git(path, ["init", "-b", "main"]);
-    write_file(path, "README.md", "seed");
-    run_git(path, ["add", "README.md"]);
+fn init_repo(path: &Utf8PathBuf) -> io::Result<()> {
+    run_git(path, ["init", "-b", "main"])?;
+    write_file(path, "README.md", "seed")?;
+    run_git(path, ["add", "README.md"])?;
     run_git(
         path,
         [
@@ -143,36 +144,37 @@ fn init_repo(path: &Utf8PathBuf) {
             "-m",
             "init",
         ],
-    );
+    )
 }
 
-fn create_repo_dir(temp_dir: &TempDir) -> Utf8PathBuf {
+fn create_repo_dir(temp_dir: &TempDir) -> io::Result<Utf8PathBuf> {
     let temp_dir_path = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
-        .unwrap_or_else(|_| panic!("temp dir path is not utf8"));
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "temp dir path is not utf8"))?;
     let repo_dir = temp_dir_path.join("project");
     cap_std::fs_utf8::Dir::open_ambient_dir(temp_dir_path.as_path(), cap_std::ambient_authority())
-        .and_then(|dir| dir.create_dir("project"))
-        .unwrap_or_else(|err| panic!("create repo dir: {err}"));
-    repo_dir
+        .and_then(|dir| dir.create_dir("project"))?;
+    Ok(repo_dir)
 }
 
-fn mark_repo_dirty(path: &Utf8PathBuf) {
-    write_file(path, "README.md", "updated");
-    run_git(path, ["add", "README.md"]);
-    write_file(path, "README.md", "dirty");
+fn mark_repo_dirty(path: &Utf8PathBuf) -> io::Result<()> {
+    write_file(path, "README.md", "updated")?;
+    run_git(path, ["add", "README.md"])?;
+    write_file(path, "README.md", "dirty")
 }
 
-fn write_file(path: &Utf8PathBuf, name: &str, contents: &str) {
+fn write_file(path: &Utf8PathBuf, name: &str, contents: &str) -> io::Result<()> {
     cap_std::fs_utf8::Dir::open_ambient_dir(path.as_path(), cap_std::ambient_authority())
         .and_then(|dir| dir.write(name, contents))
-        .unwrap_or_else(|err| panic!("write file: {err}"));
 }
 
-fn run_git(path: &Utf8PathBuf, args: impl IntoIterator<Item = &'static str>) {
+fn run_git(path: &Utf8PathBuf, args: impl IntoIterator<Item = &'static str>) -> io::Result<()> {
     let status = Command::new("git")
         .args(args)
         .current_dir(path.as_std_path())
-        .status()
-        .unwrap_or_else(|err| panic!("git command: {err}"));
-    assert!(status.success());
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other("git command failed"))
+    }
 }

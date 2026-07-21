@@ -34,40 +34,52 @@ use mockable::DefaultClock;
 ///
 /// Returns an error if configuration cannot be loaded, commands fail, or the
 /// tmux configuration cannot be updated.
-#[expect(clippy::print_stdout, reason = "CLI output is the intended behaviour")]
 pub fn run() -> Result<(), DbarError> {
-    let command = config::load_command()?;
-    match command {
-        DbarCommand::Status(args) => {
-            let runner = RealCommandRunner;
-            let clock = DefaultClock;
-            let mock_client = args.github_mock_pr.as_deref().map(MockGitHubClient::new);
-            let gh_client = GhCliClient::new(&runner);
-            let github: &dyn GitHubClient = match mock_client.as_ref() {
-                Some(client) => client,
-                None => &gh_client,
-            };
-            let line = status::build_status_line(&args, &runner, &clock, github)?;
-            println!("{line}");
-        }
-        DbarCommand::Install(args) => {
-            let path = args
-                .path
-                .or_else(|| Some(config::default_tmux_config_path()));
-            let position = args.position.unwrap_or_default();
-            let outcome = install::install(path, position, args.dry_run, args.full)?;
-            if outcome.dry_run {
-                println!("Dry run for {}:", outcome.path);
-                println!("{}", outcome.snippet);
-            } else if outcome.updated {
-                println!("Updated tmux config at {}", outcome.path);
-                if let Some(backup) = outcome.backup_path {
-                    println!("Backup written to {backup}");
-                }
-            } else {
-                println!("tmux config already up to date at {}", outcome.path);
-            }
-        }
+    match config::load_command()? {
+        DbarCommand::Status(args) => run_status(&args),
+        DbarCommand::Install(args) => run_install(args),
     }
+}
+
+/// Render a status line segment and print it to stdout.
+#[expect(clippy::print_stdout, reason = "CLI output is the intended behaviour")]
+fn run_status(args: &config::StatusArgs) -> Result<(), DbarError> {
+    let runner = RealCommandRunner;
+    let clock = DefaultClock;
+    let mock_client = args.github_mock_pr.as_deref().map(MockGitHubClient::new);
+    let gh_client = GhCliClient::new(&runner);
+    let github: &dyn GitHubClient = match mock_client.as_ref() {
+        Some(client) => client,
+        None => &gh_client,
+    };
+    let line = status::build_status_line(args, &runner, &clock, github)?;
+    println!("{line}");
     Ok(())
+}
+
+/// Install the tmux snippet and report the outcome to stdout.
+fn run_install(args: config::InstallArgs) -> Result<(), DbarError> {
+    let path = args
+        .path
+        .or_else(|| Some(config::default_tmux_config_path()));
+    let position = args.position.unwrap_or_default();
+    let outcome = install::install(path, position, args.dry_run, args.full)?;
+    report_install_outcome(&outcome);
+    Ok(())
+}
+
+/// Print the result of an install run to stdout.
+#[expect(clippy::print_stdout, reason = "CLI output is the intended behaviour")]
+fn report_install_outcome(outcome: &install::InstallOutcome) {
+    if outcome.dry_run {
+        println!("Dry run for {}:", outcome.path);
+        println!("{}", outcome.snippet);
+    } else if outcome.updated {
+        println!("Updated tmux config at {}", outcome.path);
+        if let Some(backup) = &outcome.backup_path {
+            println!("Backup written to {backup}");
+        }
+    } else {
+        println!("tmux config already up to date at {}", outcome.path);
+    }
 }

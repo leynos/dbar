@@ -149,20 +149,16 @@ const fn to_epoch_seconds(timestamp: i64) -> Result<u64, CacheError> {
 
 #[cfg(test)]
 mod tests {
+    //! Round-trip and TTL-expiry tests for the PR cache layer.
     use super::*;
     use camino::Utf8PathBuf;
     use mockable::DefaultClock;
-    use rstest::fixture;
     use rstest::rstest;
     use tempfile::TempDir;
 
-    #[fixture]
-    fn temp_dir() -> TempDir {
-        TempDir::new().expect("temp dir")
-    }
-
     #[rstest]
-    fn cache_round_trip(temp_dir: TempDir) {
+    fn cache_round_trip() {
+        let temp_dir = TempDir::new().expect("temp dir");
         let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("cache.json"))
             .map_err(|_| CacheError::InvalidUtf8)
             .expect("cache path");
@@ -173,7 +169,8 @@ mod tests {
     }
 
     #[rstest]
-    fn cache_expires_when_ttl_passed(temp_dir: TempDir) {
+    fn cache_expires_when_ttl_passed() {
+        let temp_dir = TempDir::new().expect("temp dir");
         let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("expired.json"))
             .map_err(|_| CacheError::InvalidUtf8)
             .expect("cache path");

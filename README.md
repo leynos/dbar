@@ -39,7 +39,6 @@ Reload tmux:
 tmux source-file ~/.tmux.conf
 ```
 
-
 ## tmux integration
 
 `dbar` expects tmux to pass pane and session metadata. The `install` subcommand
@@ -97,7 +96,6 @@ make check-fmt
 make lint
 make test
 ```
-
 
 ## Further documentation
 

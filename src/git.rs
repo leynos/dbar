@@ -184,6 +184,7 @@ fn upstream_counts(
 
 #[cfg(test)]
 mod tests {
+    //! Tests for git branch, dirty/staged/ahead/behind, and worktree probing.
     use super::*;
     use crate::command::{CommandError, CommandOutput, CommandRunner, CommandSpec};
     use camino::Utf8PathBuf;

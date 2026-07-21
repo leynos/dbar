@@ -15,6 +15,16 @@ pub struct TmuxContext {
     pub socket: Option<String>,
 }
 
+impl TmuxContext {
+    /// Report whether every tmux field has already been resolved.
+    const fn is_complete(&self) -> bool {
+        self.session.is_some()
+            && self.window.is_some()
+            && self.pane.is_some()
+            && self.socket.is_some()
+    }
+}
+
 /// Fill missing tmux fields by querying the tmux server.
 ///
 /// # Examples
@@ -28,11 +38,7 @@ pub struct TmuxContext {
 /// let _ = context.session;
 /// ```
 pub fn resolve_context(runner: &dyn CommandRunner, mut context: TmuxContext) -> TmuxContext {
-    if context.session.is_some()
-        && context.window.is_some()
-        && context.pane.is_some()
-        && context.socket.is_some()
-    {
+    if context.is_complete() {
         return context;
     }
 
