@@ -1,8 +1,6 @@
 //! `dbar` application entry point.
 
-// TODO: Remove this stub and implement actual application functionality.
 /// Application entry point.
-#[expect(clippy::print_stdout, reason = "CLI output is the intended behaviour")]
-fn main() {
-    println!("Hello from dbar!");
+fn main() -> Result<(), dbar::DbarError> {
+    dbar::run()
 }
