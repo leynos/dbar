@@ -71,7 +71,7 @@ pub fn install(
     };
 
     let (updated, contents) = apply_snippet(&existing, &snippet)?;
-    let backup_path = if updated && !dry_run && !existing.is_empty() {
+    let backup_path = if should_back_up(updated, dry_run, &existing) {
         let backup = backup_path_for(&config_path);
         write(&backup, &existing)?;
         Some(backup)
@@ -90,6 +90,14 @@ pub fn install(
         dry_run,
         snippet,
     })
+}
+
+/// Report whether the existing config warrants a backup before writing.
+///
+/// A backup is only written when the snippet actually changes the file, the
+/// run is not a dry run, and there is prior content worth preserving.
+const fn should_back_up(updated: bool, dry_run: bool, existing: &str) -> bool {
+    updated && !dry_run && !existing.is_empty()
 }
 
 fn apply_snippet(existing: &str, snippet: &str) -> Result<(bool, String), InstallError> {
@@ -169,22 +177,21 @@ fn open_parent(path: &Utf8Path) -> Result<(Dir, &str), InstallError> {
 
 #[cfg(test)]
 mod tests {
+    //! Behavioural tests for tmux snippet installation, idempotence, and layout.
     use super::*;
     use camino::Utf8PathBuf;
-    use rstest::fixture;
     use rstest::rstest;
     use tempfile::TempDir;
 
-    #[fixture]
-    fn temp_dir() -> TempDir {
-        TempDir::new().expect("temp dir")
+    fn config_path(temp_dir: &TempDir) -> Result<Utf8PathBuf, InstallError> {
+        Utf8PathBuf::from_path_buf(temp_dir.path().join("tmux.conf"))
+            .map_err(|_| InstallError::MissingFileName)
     }
 
     #[rstest]
-    fn install_writes_snippet(temp_dir: TempDir) {
-        let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("tmux.conf"))
-            .map_err(|_| InstallError::MissingFileName)
-            .expect("tmux config path");
+    fn install_writes_snippet() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let path = config_path(&temp_dir).expect("tmux config path");
         let initial = "set -g status on\n";
         write(&path, initial).expect("write config");
 
@@ -199,10 +206,9 @@ mod tests {
     }
 
     #[rstest]
-    fn install_is_idempotent(temp_dir: TempDir) {
-        let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("tmux.conf"))
-            .map_err(|_| InstallError::MissingFileName)
-            .expect("tmux config path");
+    fn install_is_idempotent() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let path = config_path(&temp_dir).expect("tmux config path");
         let _ = install(Some(path.clone()), StatusPosition::Right, false, false)
             .expect("install snippet");
         let second = install(Some(path.clone()), StatusPosition::Right, false, false)
@@ -211,10 +217,9 @@ mod tests {
     }
 
     #[rstest]
-    fn install_full_adds_client_width(temp_dir: TempDir) {
-        let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("tmux.conf"))
-            .map_err(|_| InstallError::MissingFileName)
-            .expect("tmux config path");
+    fn install_full_adds_client_width() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let path = config_path(&temp_dir).expect("tmux config path");
         let outcome =
             install(Some(path), StatusPosition::Left, true, true).expect("install snippet");
         assert!(
@@ -226,10 +231,9 @@ mod tests {
     }
 
     #[rstest]
-    fn install_right_enables_clock(temp_dir: TempDir) {
-        let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("tmux.conf"))
-            .map_err(|_| InstallError::MissingFileName)
-            .expect("tmux config path");
+    fn install_right_enables_clock() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let path = config_path(&temp_dir).expect("tmux config path");
         let outcome =
             install(Some(path), StatusPosition::Right, true, false).expect("install snippet");
         assert!(outcome.snippet.contains("--show-clock true"));
@@ -237,10 +241,9 @@ mod tests {
     }
 
     #[rstest]
-    fn install_left_omits_clock(temp_dir: TempDir) {
-        let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("tmux.conf"))
-            .map_err(|_| InstallError::MissingFileName)
-            .expect("tmux config path");
+    fn install_left_omits_clock() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let path = config_path(&temp_dir).expect("tmux config path");
         let outcome =
             install(Some(path), StatusPosition::Left, true, false).expect("install snippet");
         assert!(!outcome.snippet.contains("--show-clock true"));

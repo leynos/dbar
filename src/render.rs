@@ -290,6 +290,7 @@ const fn reset() -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for status-line rendering, style tags, and glyph emission.
     use super::*;
     use crate::types::{AheadCount, BehindCount, BranchName, PrNumber, ProjectName};
 
