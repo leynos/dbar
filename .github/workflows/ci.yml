@@ -50,7 +50,7 @@ jobs:
       - name: Lint
         run: make lint
       - name: Test and Measure Coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@f9f1c863c8a5bef64aa6779caa746e1a4a6c1ad4
+        uses: leynos/shared-actions/.github/actions/generate-coverage@6b9dc1be1b8bfb585ddd0083d50b9d6597cd902e
         with:
           output-path: lcov.info
           format: lcov
