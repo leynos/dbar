@@ -49,24 +49,26 @@ cargo run -- install --path ~/.tmux.conf --dry-run
 
 ### Manual snippet
 
-If you prefer to edit tmux manually, use a command substitution and pass tmux
-formats into `dbar status`:
+To edit tmux manually, use a command substitution and pass tmux formats into
+`dbar status`:
 
 ```tmux
 set -g status-right '#(dbar status \
-  --project-dir "#{pane_current_path}" \
-  --session "#{session_name}" \
-  --window "#{window_index}" \
-  --pane "#{pane_id}" \
-  --socket "#{socket_path}" \
+  --project-dir #{q:pane_current_path} \
+  --session #{q:session_name} \
+  --window #{q:window_index} \
+  --pane #{q:pane_id} \
+  --socket #{q:socket_path} \
   --show-clock true)'
 ```
 
 Tmux supports line continuations with trailing backslashes, so this snippet can
-be wrapped for readability.
+be wrapped for readability. The `#{q:...}` form makes tmux shell-quote each
+value before it is spliced into the `#(...)` command, preventing shell
+injection.
 
 To right-align the tmux segment when a client width is supplied, append
-`--client-width "#{client_width}"` to the command.
+`--client-width #{q:client_width}` to the command.
 
 The tmux status line protocol and style tags are explained in
 `docs/tmux-statuslines-in-a-nutshell.md`.

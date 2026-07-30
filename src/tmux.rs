@@ -69,7 +69,7 @@ fn query_tmux(runner: &dyn CommandRunner) -> Option<(String, String, String, Str
         "#{session_name}|#{window_index}|#{pane_id}|#{socket_path}",
     ]);
     let output = runner.run(&spec).ok()?;
-    let mut parts = output.stdout.splitn(4, '|');
+    let mut parts = output.stdout.trim().splitn(4, '|');
     let session = parts.next()?.to_owned();
     let window = parts.next()?.to_owned();
     let pane = parts.next()?.to_owned();

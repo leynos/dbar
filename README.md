@@ -46,11 +46,11 @@ inserts a snippet like:
 
 ```tmux
 set -g status-left '#(dbar status \
-  --project-dir "#{pane_current_path}" \
-  --session "#{session_name}" \
-  --window "#{window_index}" \
-  --pane "#{pane_id}" \
-  --socket "#{socket_path}")'
+  --project-dir #{q:pane_current_path} \
+  --session #{q:session_name} \
+  --window #{q:window_index} \
+  --pane #{q:pane_id} \
+  --socket #{q:socket_path})'
 ```
 
 To enable client-width-aware right alignment, either run:
@@ -59,7 +59,7 @@ To enable client-width-aware right alignment, either run:
 cargo run -- install --full
 ```
 
-or append `--client-width "#{client_width}"` to the manual snippet.
+or append `--client-width #{q:client_width}` to the manual snippet.
 
 Installing to `status-right` enables the clock automatically:
 
@@ -69,9 +69,9 @@ cargo run -- install --position right
 
 ## Configuration
 
-Configuration uses `ortho_config`. Defaults can be supplied in `.dbar.toml`,
-environment variables (`DBAR_*`), or CLI flags. Subcommand config lives under
-`cmds.status` and `cmds.install`:
+Configuration uses `ortho_config`. `.dbar.toml` defaults are overridden by
+`DBAR_*` environment variables, which are in turn overridden by CLI flags.
+Subcommand config lives under `cmds.status` and `cmds.install`:
 
 ```toml
 [cmds.status]

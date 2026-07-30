@@ -132,18 +132,22 @@ fn build_snippet(position: StatusPosition, full: bool) -> String {
         StatusPosition::Left => "status-left",
         StatusPosition::Right => "status-right",
     };
+    // Use tmux's `#{q:...}` modifier so each value is shell-quoted by tmux
+    // before it is spliced into the `#(...)` command that tmux runs via
+    // `/bin/sh`. Bare double quotes still permit command substitution, so an
+    // unescaped path or session name could otherwise inject shell commands.
     let mut command = String::from(concat!(
-        "dbar status --project-dir \"#{pane_current_path}\" ",
-        "--session \"#{session_name}\" ",
-        "--window \"#{window_index}\" ",
-        "--pane \"#{pane_id}\" ",
-        "--socket \"#{socket_path}\""
+        "dbar status --project-dir #{q:pane_current_path} ",
+        "--session #{q:session_name} ",
+        "--window #{q:window_index} ",
+        "--pane #{q:pane_id} ",
+        "--socket #{q:socket_path}"
     ));
     if matches!(position, StatusPosition::Right) {
         command.push_str(" --show-clock true");
     }
     if full {
-        command.push_str(" --client-width \"#{client_width}\"");
+        command.push_str(" --client-width #{q:client_width}");
     }
     let length_line = if full {
         format!("set -g {target}-length 999\n")
@@ -158,18 +162,32 @@ fn backup_path_for(path: &Utf8Path) -> Utf8PathBuf {
 }
 
 fn read_to_string(path: &Utf8Path) -> Result<String, InstallError> {
-    let (dir, file_name) = open_parent(path)?;
+    // Reads must never create directories: a missing parent surfaces as a
+    // `NotFound` error that the caller treats as "no existing config", so a
+    // `--dry-run` never mutates the filesystem.
+    let (dir, file_name) = open_parent_for_read(path)?;
     Ok(dir.read_to_string(file_name)?)
 }
 
 fn write(path: &Utf8Path, contents: &str) -> Result<(), InstallError> {
-    let (dir, file_name) = open_parent(path)?;
+    let (dir, file_name) = open_parent_for_write(path)?;
     Ok(dir.write(file_name, contents.as_bytes())?)
 }
 
-fn open_parent(path: &Utf8Path) -> Result<(Dir, &str), InstallError> {
+fn split_parent(path: &Utf8Path) -> Result<(&Utf8Path, &str), InstallError> {
     let parent = path.parent().unwrap_or_else(|| Utf8Path::new("."));
     let file_name = path.file_name().ok_or(InstallError::MissingFileName)?;
+    Ok((parent, file_name))
+}
+
+fn open_parent_for_read(path: &Utf8Path) -> Result<(Dir, &str), InstallError> {
+    let (parent, file_name) = split_parent(path)?;
+    let dir = Dir::open_ambient_dir(parent, ambient_authority())?;
+    Ok((dir, file_name))
+}
+
+fn open_parent_for_write(path: &Utf8Path) -> Result<(Dir, &str), InstallError> {
+    let (parent, file_name) = split_parent(path)?;
     Dir::create_ambient_dir_all(parent, ambient_authority())?;
     let dir = Dir::open_ambient_dir(parent, ambient_authority())?;
     Ok((dir, file_name))
@@ -183,15 +201,17 @@ mod tests {
     use rstest::rstest;
     use tempfile::TempDir;
 
-    fn config_path(temp_dir: &TempDir) -> Result<Utf8PathBuf, InstallError> {
-        Utf8PathBuf::from_path_buf(temp_dir.path().join("tmux.conf"))
-            .map_err(|_| InstallError::MissingFileName)
+    /// Create a temporary directory and the `tmux.conf` path within it.
+    fn workspace() -> Result<(TempDir, Utf8PathBuf), InstallError> {
+        let temp_dir = TempDir::new().map_err(InstallError::Io)?;
+        let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("tmux.conf"))
+            .map_err(|_| InstallError::MissingFileName)?;
+        Ok((temp_dir, path))
     }
 
     #[rstest]
     fn install_writes_snippet() {
-        let temp_dir = TempDir::new().expect("temp dir");
-        let path = config_path(&temp_dir).expect("tmux config path");
+        let (_temp_dir, path) = workspace().expect("workspace");
         let initial = "set -g status on\n";
         write(&path, initial).expect("write config");
 
@@ -207,8 +227,7 @@ mod tests {
 
     #[rstest]
     fn install_is_idempotent() {
-        let temp_dir = TempDir::new().expect("temp dir");
-        let path = config_path(&temp_dir).expect("tmux config path");
+        let (_temp_dir, path) = workspace().expect("workspace");
         let _ = install(Some(path.clone()), StatusPosition::Right, false, false)
             .expect("install snippet");
         let second = install(Some(path.clone()), StatusPosition::Right, false, false)
@@ -218,22 +237,16 @@ mod tests {
 
     #[rstest]
     fn install_full_adds_client_width() {
-        let temp_dir = TempDir::new().expect("temp dir");
-        let path = config_path(&temp_dir).expect("tmux config path");
+        let (_temp_dir, path) = workspace().expect("workspace");
         let outcome =
             install(Some(path), StatusPosition::Left, true, true).expect("install snippet");
-        assert!(
-            outcome
-                .snippet
-                .contains("--client-width \"#{client_width}\"")
-        );
+        assert!(outcome.snippet.contains("--client-width #{q:client_width}"));
         assert!(outcome.snippet.contains("status-left-length 999"));
     }
 
     #[rstest]
     fn install_right_enables_clock() {
-        let temp_dir = TempDir::new().expect("temp dir");
-        let path = config_path(&temp_dir).expect("tmux config path");
+        let (_temp_dir, path) = workspace().expect("workspace");
         let outcome =
             install(Some(path), StatusPosition::Right, true, false).expect("install snippet");
         assert!(outcome.snippet.contains("--show-clock true"));
@@ -242,10 +255,40 @@ mod tests {
 
     #[rstest]
     fn install_left_omits_clock() {
-        let temp_dir = TempDir::new().expect("temp dir");
-        let path = config_path(&temp_dir).expect("tmux config path");
+        let (_temp_dir, path) = workspace().expect("workspace");
         let outcome =
             install(Some(path), StatusPosition::Left, true, false).expect("install snippet");
         assert!(!outcome.snippet.contains("--show-clock true"));
+    }
+
+    #[rstest]
+    fn install_dry_run_leaves_missing_parent_absent() {
+        let (temp_dir, _) = workspace().expect("workspace");
+        let missing_parent = Utf8PathBuf::from_path_buf(temp_dir.path().join("missing"))
+            .expect("missing parent path");
+        let config = missing_parent.join("tmux.conf");
+        let outcome =
+            install(Some(config), StatusPosition::Left, true, false).expect("dry run install");
+        assert!(outcome.dry_run);
+        // The parent directory must not have been created by the dry run.
+        assert!(Dir::open_ambient_dir(missing_parent.as_path(), ambient_authority()).is_err());
+    }
+
+    #[rstest]
+    fn install_snippet_shell_quotes_tmux_formats() {
+        let snippet = build_snippet(StatusPosition::Left, true);
+        for token in [
+            "#{q:pane_current_path}",
+            "#{q:session_name}",
+            "#{q:window_index}",
+            "#{q:pane_id}",
+            "#{q:socket_path}",
+            "#{q:client_width}",
+        ] {
+            assert!(snippet.contains(token), "snippet missing {token}");
+        }
+        // The unquoted forms that permitted shell injection must be gone.
+        assert!(!snippet.contains("\"#{pane_current_path}\""));
+        assert!(!snippet.contains("\"#{client_width}\""));
     }
 }

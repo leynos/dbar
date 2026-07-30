@@ -1,5 +1,8 @@
 //! Status line assembly for dbar.
 
+use std::collections::hash_map::DefaultHasher;
+use std::fmt::Write as _;
+use std::hash::{Hash, Hasher};
 use std::io::{self, ErrorKind};
 
 use camino::Utf8PathBuf;
@@ -68,7 +71,7 @@ pub fn build_status_line(
             socket: args.socket.clone(),
         },
     );
-    let clock_label = render_clock(args, clock);
+    let clock_label = render_clock(args, clock)?;
 
     let render_context = render::RenderContext {
         project: &project,
@@ -100,10 +103,17 @@ fn resolve_project_dir(args: &StatusArgs) -> Result<Utf8PathBuf, DbarError> {
     Ok(path)
 }
 
-fn render_clock(args: &StatusArgs, clock: &dyn Clock) -> Option<String> {
-    args.show_clock
-        .unwrap_or(false)
-        .then(|| clock.local().format(&args.clock_format).to_string())
+fn render_clock(args: &StatusArgs, clock: &dyn Clock) -> Result<Option<String>, DbarError> {
+    if !args.show_clock.unwrap_or(false) {
+        return Ok(None);
+    }
+    // `DelayedFormat::fmt` returns an error for invalid strftime directives, so
+    // render via `write!` and surface that as a typed error rather than letting
+    // `ToString::to_string` panic on a user-supplied `clock_format`.
+    let mut label = String::new();
+    write!(label, "{}", clock.local().format(&args.clock_format))
+        .map_err(|_| io::Error::new(ErrorKind::InvalidInput, "invalid clock_format"))?;
+    Ok(Some(label))
 }
 
 fn pr_number(context: &PrLookup<'_>) -> Option<PrNumber> {
@@ -128,7 +138,9 @@ fn pr_number(context: &PrLookup<'_>) -> Option<PrNumber> {
     {
         Ok(Some(value)) => Some(value),
         Ok(None) => pr_from_branch(context.branch),
-        Err(_err) => pr_from_branch(context.branch),
+        // A failed lookup (network/rate-limit) must not poison the cache with a
+        // fallback value for the whole TTL; return without writing the cache.
+        Err(_err) => return pr_from_branch(context.branch),
     };
 
     if let Some(path) = cache_path.as_ref() {
@@ -154,17 +166,13 @@ fn pr_from_branch(branch: &str) -> Option<PrNumber> {
 }
 
 fn pr_cache_path(cache_dir: &Utf8PathBuf, branch: &str, project_dir: &Utf8PathBuf) -> Utf8PathBuf {
-    let key = format!(
-        "pr_{}_{}",
-        sanitize_key(project_dir.as_str()),
-        sanitize_key(branch),
-    );
-    cache_dir.join(format!("{key}.json"))
-}
-
-fn sanitize_key(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-        .collect()
+    // Hash the raw (project, branch) pair so punctuation-only differences (for
+    // example `feature/a` versus `feature-a`) never collapse to the same cache
+    // file. `str`'s `Hash` impl length-prefixes each field, so the boundary
+    // between the two inputs cannot be forged either. `DefaultHasher` is seeded
+    // deterministically, so the filename is stable across CLI invocations.
+    let mut hasher = DefaultHasher::new();
+    (project_dir.as_str(), branch).hash(&mut hasher);
+    let digest = hasher.finish();
+    cache_dir.join(format!("pr_{digest:016x}.json"))
 }

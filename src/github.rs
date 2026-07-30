@@ -1,10 +1,15 @@
 //! GitHub pull request lookup helpers.
 
+use std::time::Duration;
+
 use camino::Utf8Path;
 use thiserror::Error;
 
 use crate::command::{CommandError, CommandRunner, CommandSpec};
 use crate::types::PrNumber;
+
+/// Network probes should fail fast so the tmux status line stays responsive.
+const GH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// GitHub client interface used for PR lookup.
 pub trait GitHubClient {
@@ -66,7 +71,8 @@ impl GitHubClient for GhCliClient<'_> {
             .run(
                 &CommandSpec::new("gh")
                     .args(["pr", "view", "--json", "number", "--jq", ".number"])
-                    .cwd(project_dir.to_path_buf()),
+                    .cwd(project_dir.to_path_buf())
+                    .timeout(GH_TIMEOUT),
             )
             .map_err(GitHubError::Command)?
             .stdout;

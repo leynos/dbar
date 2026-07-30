@@ -1,5 +1,7 @@
 //! Cache helpers for expensive lookups.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::ambient_authority;
 use cap_std::fs_utf8::Dir;
@@ -9,6 +11,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::types::CacheTtlSeconds;
+
+/// Disambiguates temp-file names for concurrent writers within one process.
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
 /// Errors produced while reading or writing cached data.
@@ -130,7 +135,20 @@ fn read_to_string(path: &Utf8Path) -> Result<String, CacheError> {
 
 fn write(path: &Utf8Path, payload: &str) -> Result<(), CacheError> {
     let (dir, file_name) = open_parent(path)?;
-    Ok(dir.write(file_name, payload.as_bytes())?)
+    // Write to a uniquely named temp file in the same directory, then rename it
+    // over the target. Rename is atomic on the same filesystem, so a concurrent
+    // reader (or another writer) never observes a partially written entry.
+    let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp_name = format!("{file_name}.{}.{unique}.tmp", std::process::id());
+    let result = dir
+        .write(tmp_name.as_str(), payload.as_bytes())
+        .and_then(|()| dir.rename(tmp_name.as_str(), &dir, file_name));
+    if result.is_err() {
+        // Best-effort cleanup; surface the original error, not the removal's.
+        dir.remove_file(tmp_name.as_str()).ok();
+    }
+    result?;
+    Ok(())
 }
 
 fn open_parent(path: &Utf8Path) -> Result<(Dir, &str), CacheError> {
@@ -183,5 +201,41 @@ mod tests {
         let clock = DefaultClock;
         let value = load_cached_value(&path, &clock, CacheTtlSeconds::new(1)).expect("read cache");
         assert!(value.is_none());
+    }
+
+    #[rstest]
+    fn concurrent_writes_never_expose_partial_json() {
+        use std::sync::{Arc, Barrier};
+
+        let temp_dir = TempDir::new().expect("temp dir");
+        let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("cache.json"))
+            .map_err(|_| CacheError::InvalidUtf8)
+            .expect("cache path");
+
+        let writers: usize = 8;
+        let barrier = Arc::new(Barrier::new(writers));
+        let mut handles = Vec::new();
+        for id in 0..writers {
+            let writer_path = path.clone();
+            let writer_barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                let clock = DefaultClock;
+                writer_barrier.wait();
+                for _ in 0..20 {
+                    store_cached_value(&writer_path, &clock, id.to_string()).expect("store cache");
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().expect("writer thread");
+        }
+
+        // A reader must always see a complete, parseable value written by one of
+        // the writers — never a truncated or interleaved JSON payload.
+        let clock = DefaultClock;
+        let value = load_cached_value(&path, &clock, CacheTtlSeconds::new(600))
+            .expect("read must never see partial JSON");
+        let observed = value.expect("a value should be present");
+        assert!((0..writers).any(|id| observed == id.to_string()));
     }
 }

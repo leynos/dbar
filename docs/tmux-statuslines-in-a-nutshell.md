@@ -1,7 +1,7 @@
 # tmux status line “protocol” (Powerline-style segments)
 
 tmux doesn’t have a separate, structured “status line protocol” like i3bar’s
-JSON. Instead, it gives you three composable building blocks:
+JSON. Instead, it provides three composable building blocks:
 
 1. **A format language** for dynamic values: `#{…}`
 2. **Inline style tags** for colours and attributes: `#[…]`
@@ -20,17 +20,17 @@ Think of the status line as a string that tmux *renders*.
 - tmux applies **styles** like `#[fg=…,bg=…,bold]`.
 - tmux runs **commands** like `#(~/bin/status)` and inserts their output.
 
-The “protocol” for your external command is simply: **print the status text you
-want tmux to display**, optionally including tmux style tags.
+The “protocol” for an external command is simply: **print the status text
+to display**, optionally including tmux style tags.
 
 ______________________________________________________________________
 
 ## 1) `#( … )`: external commands
 
-### What your command should output
+### What the command should output
 
 - Output plain text.
-- If you want colours/attributes, embed tmux style tags: `#[…]`.
+- To include colours/attributes, embed tmux style tags: `#[…]`.
 - Keep it **short** and **fast**.
 
 A tiny example script:
@@ -48,26 +48,27 @@ set -g status-right '#(~/bin/tmux-ok)'
 
 ### “Which line gets used?”
 
-Treat it as “tmux inserts the last line your command prints”. In practice:
-print one line and you’ll never have to think about it.
+Treat it as “tmux inserts the last line the command prints”. In practice:
+print a single line and no further thought is required.
 
 ### What tmux passes to the command
 
 tmux runs the command via `/bin/sh`.
 
-Important nuance: it **does not run inside your pane**. That means you
-shouldn’t assume you’ll get pane-scoped environment variables like `TMUX_PANE`.
+Important nuance: it **does not run inside the pane**. Pane-scoped
+environment variables like `TMUX_PANE` should not be assumed to be
+available.
 
-If you need context (session/window/pane/client), you have two reliable
+Context (session/window/pane/client) can be obtained using two reliable
 patterns:
 
 #### A) Pass the context in as arguments using tmux formats
 
 ```tmux
-set -g status-right '#(~/bin/myseg "#{session_name}" "#{window_index}" "#{pane_id}")'
+set -g status-right '#(~/bin/myseg #{q:session_name} #{q:window_index} #{q:pane_id})'
 ```
 
-Your script can then use `$1`, `$2`, `$3`.
+The script can then use `$1`, `$2`, `$3`.
 
 #### B) Query tmux from inside the script
 
@@ -82,22 +83,22 @@ Pattern A usually keeps things simpler and cheaper.
 
 ### Update cadence and performance
 
-tmux doesn’t want your status scripts to be an accidental cryptocurrency miner.
+tmux doesn’t want status scripts to be an accidental cryptocurrency miner.
 
 Practical rules:
 
 - Keep `#(…)` scripts fast (milliseconds, not seconds).
-- Cache anything expensive yourself.
-- Prefer a “daemon writes cache file; status reads cache file” arrangement if
-  you’re doing network calls.
+- Cache anything expensive.
+- Prefer a “daemon writes cache file; status reads cache file” arrangement
+  when doing network calls.
 
-You can control normal polling with:
+Normal polling can be controlled with:
 
 ```tmux
 set -g status-interval 5
 ```
 
-If you want immediate refresh (e.g. after a hook), use:
+For an immediate refresh (e.g. after a hook), use:
 
 ```sh
 tmux refresh-client -S
@@ -120,7 +121,7 @@ Example:
 set -g status-left '#[fg=black,bg=yellow,bold] #S #[default]'
 ```
 
-### Colours you can use
+### Available colours
 
 Common options:
 
@@ -148,20 +149,20 @@ Common ones:
 - `reverse`
 - `strikethrough`
 
-You can combine them:
+These can be combined:
 
 ```text
 #[fg=white,bg=colour52,bold,underscore]
 ```
 
-Reset attributes using `#[default]` (easy) or `#[none]` (if you want to keep
-colours but clear attributes).
+Reset attributes using `#[default]` (easy) or `#[none]` (to keep colours but
+clear attributes).
 
 ______________________________________________________________________
 
 ## 3) `#{…}`: tmux formats (dynamic values)
 
-Formats let you reference tmux state in strings.
+Formats reference tmux state in strings.
 
 Examples:
 
@@ -181,7 +182,7 @@ That reads as: “if `client_prefix` is true, show a red PREFIX label; otherwise
 show nothing”.
 
 Formats are useful both directly in `status-left/right` and as arguments to
-your `#(…)` commands.
+`#(…)` commands.
 
 ______________________________________________________________________
 
@@ -222,7 +223,7 @@ set -g status-interval 5
 set -g status-left '#[fg=colour231,bg=colour25,bold] #S #[default]'
 
 # A Powerline-ish right side built from an external script
-set -g status-right '#(~/bin/tmux-segs "#{session_name}" "#{window_index}" "#{pane_id}")'
+set -g status-right '#(~/bin/tmux-segs #{q:session_name} #{q:window_index} #{q:pane_id})'
 ```
 
 ### ~/bin/tmux-segs
@@ -262,16 +263,16 @@ ______________________________________________________________________
 
 ## Hooks: refreshing when tmux state changes
 
-Polling every N seconds is fine for clocks, but you may want immediate refresh
-when tmux state changes.
+Polling every N seconds is fine for clocks, but immediate refresh may be
+wanted when tmux state changes.
 
 tmux supports “hooks” that run commands on events. A common pattern is:
 
-- hook runs your update action (write a cache file, etc.)
+- hook runs the update action (write a cache file, etc.)
 - hook runs `tmux refresh-client -S`
 
-If you’re doing heavy work, don’t do it directly in the hook; have the hook
-nudge your daemon.
+For heavy work, avoid doing it directly in the hook; have the hook nudge
+the daemon.
 
 ______________________________________________________________________
 
@@ -280,11 +281,15 @@ ______________________________________________________________________
 ### Fonts
 
 Powerline separators need glyph support. Install a Nerd Font (or the older
-Powerline-patched fonts) and configure your terminal to use it.
+Powerline-patched fonts) and configure the terminal to use it.
 
 ### Quoting
 
-If you pass `#{…}` formats into `#(…)` as arguments, quote them.
+When `#{…}` formats are passed into `#(…)` as arguments, they should be
+quoted using tmux’s shell-quoting modifier, `#{q:…}`. Bare double quotes are
+not enough: command substitution still runs inside them, so a session,
+window, or pane name containing shell metacharacters remains a
+shell-injection risk.
 
 Bad:
 
@@ -295,13 +300,13 @@ set -g status-right '#(~/bin/seg #{session_name})'
 Better:
 
 ```tmux
-set -g status-right '#(~/bin/seg "#{session_name}")'
+set -g status-right '#(~/bin/seg #{q:session_name})'
 ```
 
 ### `%` and time formatting
 
 Some status strings can be interpreted by `strftime` as well as tmux’s format
-expander (depending on the option). If you see mysterious behaviour with `%`,
+expander (depending on the option). If `%` produces mysterious behaviour,
 escape it as `%%`.
 
 ### Don’t emit ANSI escape sequences
@@ -310,8 +315,8 @@ Use `#[…]` tags rather than raw `\x1b[…m` sequences.
 
 ### Keep scripts fast
 
-If your status command sometimes hangs (DNS, a slow API, a laptop on Wi‑Fi in a
-hotel made of concrete), your status line will feel cursed.
+If a status command sometimes hangs (DNS, a slow API, a laptop on Wi‑Fi in a
+hotel made of concrete), the status line will feel cursed.
 
 Cache and degrade gracefully.
 
@@ -319,7 +324,7 @@ ______________________________________________________________________
 
 ## A good “architecture” for serious setups
 
-If you want a polished, low-latency, low-jitter status line:
+For a polished, low-latency, low-jitter status line:
 
 - A background process updates a cache (file or shared memory) on events/timers.
 - The status line runs tiny commands that just print cached content.

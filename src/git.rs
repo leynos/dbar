@@ -36,9 +36,7 @@ pub struct GitStatus {
 /// println!("{name}");
 /// ```
 pub fn project_name(runner: &dyn CommandRunner, project_dir: &Utf8Path) -> ProjectName {
-    let origin = CommandSpec::new("git")
-        .args(["remote", "get-url", "origin"])
-        .cwd(project_dir.to_path_buf());
+    let origin = git_command(project_dir, ["remote", "get-url", "origin"]);
     if let Ok(output) = runner.run(&origin)
         && let Some(name) = parse_origin_name(&output.stdout)
     {
@@ -112,10 +110,18 @@ fn is_worktree_path(path: &Utf8Path) -> bool {
     value.contains(".worktrees") || value.contains("/.git/worktrees/")
 }
 
+/// Build a `git` command spec rooted at the given project directory.
+fn git_command(
+    project_dir: &Utf8Path,
+    args: impl IntoIterator<Item = impl Into<String>>,
+) -> CommandSpec {
+    CommandSpec::new("git")
+        .args(args)
+        .cwd(project_dir.to_path_buf())
+}
+
 fn is_git_repo(runner: &dyn CommandRunner, project_dir: &Utf8Path) -> bool {
-    let spec = CommandSpec::new("git")
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .cwd(project_dir.to_path_buf());
+    let spec = git_command(project_dir, ["rev-parse", "--is-inside-work-tree"]);
     match runner.run(&spec) {
         Ok(output) => output.stdout.trim() == "true",
         Err(_) => false,
@@ -123,19 +129,17 @@ fn is_git_repo(runner: &dyn CommandRunner, project_dir: &Utf8Path) -> bool {
 }
 
 fn git_branch(runner: &dyn CommandRunner, project_dir: &Utf8Path) -> BranchName {
-    let spec = CommandSpec::new("git")
-        .args(["branch", "--show-current"])
-        .cwd(project_dir.to_path_buf());
+    let spec = git_command(project_dir, ["branch", "--show-current"]);
     match runner.run(&spec) {
-        Ok(output) if !output.stdout.is_empty() => BranchName::new(output.stdout),
+        Ok(output) if !output.stdout.trim().is_empty() => {
+            BranchName::new(output.stdout.trim().to_owned())
+        }
         _ => BranchName::new("detached"),
     }
 }
 
 fn git_worktree_status(runner: &dyn CommandRunner, project_dir: &Utf8Path) -> (bool, bool) {
-    let spec = CommandSpec::new("git")
-        .args(["status", "--porcelain"])
-        .cwd(project_dir.to_path_buf());
+    let spec = git_command(project_dir, ["status", "--porcelain"]);
     let Ok(output) = runner.run(&spec) else {
         return (false, false);
     };
@@ -162,9 +166,10 @@ fn upstream_counts(
     runner: &dyn CommandRunner,
     project_dir: &Utf8Path,
 ) -> (AheadCount, BehindCount) {
-    let spec = CommandSpec::new("git")
-        .args(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
-        .cwd(project_dir.to_path_buf());
+    let spec = git_command(
+        project_dir,
+        ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+    );
     let Ok(output) = runner.run(&spec) else {
         return (AheadCount::new(0), BehindCount::new(0));
     };

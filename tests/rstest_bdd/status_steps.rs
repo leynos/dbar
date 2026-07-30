@@ -14,7 +14,8 @@ const STAGED_GLYPH: &str = "\u{f457}";
 
 #[derive(Debug)]
 struct World {
-    temp_dir: TempDir,
+    /// Kept alive purely so the temporary directory survives the scenario.
+    _temp_dir: TempDir,
     repo_dir: Utf8PathBuf,
     output: Option<String>,
 }
@@ -31,16 +32,14 @@ fn world() -> World {
         panic!("temp dir path is not utf8");
     };
     World {
-        temp_dir,
+        _temp_dir: temp_dir,
         repo_dir,
         output: None,
     }
 }
 
 #[scenario("tests/rstest_bdd/status.feature")]
-fn status_scenarios(world: World) {
-    let _ = world;
-}
+fn status_scenarios(world: World) {}
 
 #[given("a clean git repository")]
 fn clean_repo(world: &mut World) -> io::Result<()> {
@@ -54,7 +53,6 @@ fn dirty_repo(world: &mut World) -> io::Result<()> {
 
 #[when("I run dbar status")]
 fn run_status(world: &mut World) {
-    let _temp_dir_path = world.temp_dir.path();
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("dbar");
     cmd.args([
         "status",
@@ -104,9 +102,9 @@ fn require_output(world: &World) -> Result<&String, String> {
         .ok_or_else(|| "status output was not captured".to_owned())
 }
 
-fn init_repo(world: &World, dirty: bool) -> io::Result<()> {
+fn init_repo(world: &World, is_dirty: bool) -> io::Result<()> {
     run_git(world, ["init", "-b", "main"])?;
-    if dirty {
+    if is_dirty {
         write_repo_file(world, "seed")?;
         run_git(world, ["add", "demo.txt"])?;
         write_repo_file(world, "seeded")?;
@@ -115,7 +113,7 @@ fn init_repo(world: &World, dirty: bool) -> io::Result<()> {
 }
 
 fn write_repo_file(world: &World, contents: &str) -> io::Result<()> {
-    cap_std::fs_utf8::Dir::open_ambient_dir(world.repo_dir.clone(), cap_std::ambient_authority())
+    cap_std::fs_utf8::Dir::open_ambient_dir(world.repo_dir.as_path(), cap_std::ambient_authority())
         .and_then(|dir| dir.write("demo.txt", contents))
 }
 

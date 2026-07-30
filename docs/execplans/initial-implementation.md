@@ -152,7 +152,7 @@ in tmux via `#(dbar)` and all specified tests pass.
 
 - Decision: wire tmux `pane_current_path` into the install snippet to scope
   git probes to the active pane directory. Rationale: ensures branch and
-  project context match the shell running inside tmux. Date/Author: **********
+  project context match the shell running inside tmux. Date/Author: 2026-01-05
   / Codex
 
 - Decision: track `Cargo.lock` and rebuild it after the rebase. Rationale:
