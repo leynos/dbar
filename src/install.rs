@@ -1,5 +1,7 @@
 //! tmux configuration installation helpers.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use cap_std::ambient_authority;
@@ -10,6 +12,9 @@ use crate::types::StatusPosition;
 
 const MARKER_START: &str = "# dbar: begin";
 const MARKER_END: &str = "# dbar: end";
+
+/// Disambiguates temp-file names for concurrent writers within one process.
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
 /// Summary of an install operation.
@@ -38,12 +43,17 @@ pub enum InstallError {
     /// Existing markers are missing a closing delimiter.
     #[error("tmux config markers are incomplete")]
     IncompleteMarkers,
-    /// IO failures while reading or writing the config file.
-    #[error("failed to read tmux config: {0}")]
+    /// IO failures while reading or writing the config file, including backups.
+    #[error("failed to read or write tmux config: {0}")]
     Io(#[from] std::io::Error),
 }
 
 /// Install the tmux snippet into the specified configuration file.
+///
+/// The path is used verbatim: `install` does not expand a leading `~`. Callers
+/// must resolve it to an absolute path first (`config::default_tmux_config_path`
+/// does this), otherwise a literal `~` directory is created relative to the
+/// working directory.
 ///
 /// # Examples
 ///
@@ -51,7 +61,9 @@ pub enum InstallError {
 /// use dbar::install::install;
 /// use dbar::types::StatusPosition;
 ///
-/// let outcome = install(Some("~/.tmux.conf".into()), StatusPosition::Right, true, false)?;
+/// // Already resolved; `~` is not expanded by `install`.
+/// let path = dbar::config::default_tmux_config_path();
+/// let outcome = install(Some(path), StatusPosition::Right, true, false)?;
 /// assert!(outcome.dry_run);
 /// # Ok::<(), dbar::install::InstallError>(())
 /// ```
@@ -171,7 +183,20 @@ fn read_to_string(path: &Utf8Path) -> Result<String, InstallError> {
 
 fn write(path: &Utf8Path, contents: &str) -> Result<(), InstallError> {
     let (dir, file_name) = open_parent_for_write(path)?;
-    Ok(dir.write(file_name, contents.as_bytes())?)
+    // Write to a uniquely named temp file, then rename it over the target.
+    // `Dir::write` truncates in place, so an interrupted write would otherwise
+    // leave a half-written tmux config behind.
+    let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp_name = format!("{file_name}.{}.{unique}.tmp", std::process::id());
+    let result = dir
+        .write(tmp_name.as_str(), contents.as_bytes())
+        .and_then(|()| dir.rename(tmp_name.as_str(), &dir, file_name));
+    if result.is_err() {
+        // Best-effort cleanup; surface the original error, not the removal's.
+        dir.remove_file(tmp_name.as_str()).ok();
+    }
+    result?;
+    Ok(())
 }
 
 fn split_parent(path: &Utf8Path) -> Result<(&Utf8Path, &str), InstallError> {
@@ -272,6 +297,22 @@ mod tests {
         assert!(outcome.dry_run);
         // The parent directory must not have been created by the dry run.
         assert!(Dir::open_ambient_dir(missing_parent.as_path(), ambient_authority()).is_err());
+    }
+
+    #[rstest]
+    fn install_without_path_reports_missing_path() {
+        let err = install(None, StatusPosition::Left, true, false).expect_err("no path supplied");
+        assert!(matches!(err, InstallError::MissingPath));
+    }
+
+    #[rstest]
+    fn install_reports_incomplete_markers() {
+        let (_temp_dir, path) = workspace().expect("workspace");
+        // A start marker with no matching end marker must not be rewritten.
+        write(&path, &format!("{MARKER_START}\nset -g status-left ''\n")).expect("seed config");
+        let err = install(Some(path), StatusPosition::Left, true, false)
+            .expect_err("dangling start marker");
+        assert!(matches!(err, InstallError::IncompleteMarkers));
     }
 
     #[rstest]

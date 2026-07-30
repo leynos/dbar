@@ -38,6 +38,9 @@ arguments are supplied.
 
 Use `--full` to include the client width in the status command and add a
 matching `status-left-length 999` (or `status-right-length 999`) directive.
+Setting the length to 999 only raises tmux's own display-width cap; it does
+not stop tmux from redrawing, and content can still be truncated on narrow
+clients where the terminal width is the limiting factor.
 Installing with `--position right` also enables the clock by passing
 `--show-clock true` to the status command.
 

@@ -1,6 +1,8 @@
 //! Command execution helpers for git and tmux probes.
 
+use std::io::{self, Read};
 use std::process::{Command, Stdio};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use camino::Utf8PathBuf;
@@ -137,6 +139,29 @@ pub trait CommandRunner {
 /// A command runner that executes real processes.
 pub struct RealCommandRunner;
 
+/// Take a piped handle off the child, mapping the impossible `None` to an error.
+fn take_pipe<T>(pipe: Option<T>) -> Result<T, CommandError> {
+    pipe.ok_or_else(|| CommandError::Io(io::Error::other("child pipe unavailable")))
+}
+
+/// Drain a child pipe on its own thread so the child never blocks on a full
+/// pipe buffer while the parent is waiting for it to exit.
+fn spawn_reader(mut pipe: impl Read + Send + 'static) -> JoinHandle<io::Result<Vec<u8>>> {
+    std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        pipe.read_to_end(&mut buffer)?;
+        Ok(buffer)
+    })
+}
+
+/// Collect a reader thread's buffered bytes.
+fn join_reader(handle: JoinHandle<io::Result<Vec<u8>>>) -> Result<Vec<u8>, CommandError> {
+    let bytes = handle
+        .join()
+        .map_err(|_| io::Error::other("output reader thread panicked"))??;
+    Ok(bytes)
+}
+
 impl CommandRunner for RealCommandRunner {
     fn run(&self, spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
         let mut command = Command::new(&spec.program);
@@ -150,22 +175,34 @@ impl CommandRunner for RealCommandRunner {
         }
         let timeout = spec.timeout.unwrap_or(DEFAULT_TIMEOUT);
         let mut child = command.spawn()?;
-        if child.wait_timeout(timeout)?.is_none() {
-            // The probes emit small outputs, so a child that has not exited by
-            // now is genuinely stalled: terminate it and report the timeout.
+
+        // Drain both pipes concurrently with the wait. A child that writes more
+        // than the OS pipe buffer (64 KiB on Linux) blocks in `write` until the
+        // parent reads, which would otherwise be misreported as a timeout.
+        let stdout_reader = spawn_reader(take_pipe(child.stdout.take())?);
+        let stderr_reader = spawn_reader(take_pipe(child.stderr.take())?);
+
+        let Some(status) = child.wait_timeout(timeout)? else {
             child.kill()?;
             child.wait()?;
+            // Killing the child closes its pipes, so the readers reach EOF and
+            // finish; join them to avoid leaking threads, but keep the timeout
+            // as the reported failure.
+            drop(join_reader(stdout_reader));
+            drop(join_reader(stderr_reader));
             return Err(CommandError::Timeout { timeout });
-        }
-        let output = child.wait_with_output()?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        };
+
+        let stdout_bytes = join_reader(stdout_reader)?;
+        let stderr_bytes = join_reader(stderr_reader)?;
+        if !status.success() {
+            let stderr = String::from_utf8_lossy(&stderr_bytes).trim().to_owned();
             return Err(CommandError::NonZero {
-                status: output.status.code(),
+                status: status.code(),
                 stderr,
             });
         }
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        let stdout = String::from_utf8_lossy(&stdout_bytes).trim().to_owned();
         Ok(CommandOutput { stdout })
     }
 }
@@ -190,6 +227,19 @@ mod tests {
         let spec = CommandSpec::new("false");
         let err = runner.run(&spec).expect_err("false exits non-zero");
         assert!(matches!(err, CommandError::NonZero { .. }));
+    }
+
+    #[rstest]
+    fn run_captures_output_larger_than_the_pipe_buffer() {
+        // The child writes far more than the 64 KiB pipe buffer before exiting.
+        // Without concurrent draining it would block in `write` and be
+        // misreported as a timeout.
+        let runner = RealCommandRunner;
+        let spec = CommandSpec::new("sh")
+            .args(["-c", "head -c 200000 /dev/zero | tr '\\0' 'x'; exit 0"])
+            .timeout(Duration::from_secs(30));
+        let output = runner.run(&spec).expect("large output must not time out");
+        assert_eq!(output.stdout.len(), 200_000);
     }
 
     #[rstest]

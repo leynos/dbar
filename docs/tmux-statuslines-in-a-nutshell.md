@@ -132,7 +132,7 @@ Common options:
 
 Examples:
 
-```text
+```plaintext
 #[fg=colour235,bg=colour39]
 #[fg=#0b1020,bg=#e0b000,bold]
 #[fg=default,bg=default]
@@ -151,7 +151,7 @@ Common ones:
 
 These can be combined:
 
-```text
+```plaintext
 #[fg=white,bg=colour52,bold,underscore]
 ```
 
@@ -174,7 +174,7 @@ Examples:
 
 There are also conditionals:
 
-```text
+```plaintext
 #{?client_prefix,#[bg=red] PREFIX #[default],}
 ```
 
@@ -197,7 +197,7 @@ A typical separator glyph is `` (requires a nerd-font/powerline-capable font)
 
 Here’s a minimal “two segment” pattern:
 
-```text
+```plaintext
 #[fg=colour235,bg=colour39] SEG1 #[fg=colour39,bg=colour234]#[fg=colour234,bg=colour220] SEG2 #[default]
 ```
 
@@ -330,4 +330,4 @@ For a polished, low-latency, low-jitter status line:
 - The status line runs tiny commands that just print cached content.
 - Hooks trigger `refresh-client -S` to redraw immediately.
 
-That’s the grown-up version of “Powerline, but I don’t want it to stutter.”
+That’s the grown-up version of “Powerline, without the stutter.”

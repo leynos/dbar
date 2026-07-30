@@ -1,15 +1,15 @@
 # Implement tmux status bar for dbar
 
 This ExecPlan is a living document. The sections `Constraints`, `Tolerances`,
-`Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`, and
-`Outcomes & Retrospective` must be kept up to date as work proceeds.
+`Risks`, `Progress`, `Surprises & discoveries`, `Decision log`, and
+`Outcomes & retrospective` must be kept up to date as work proceeds.
 
 Status: COMPLETE
 
 No `PLANS.md` exists in this repository, so this document is the source of
 truth for the plan.
 
-## Purpose / Big Picture
+## Purpose / big picture
 
 Deliver a `dbar` CLI that prints a tmux-ready status segment showing the
 current project name, git branch, git working tree state, GitHub PR,
@@ -40,7 +40,7 @@ in tmux via `#(dbar)` and all specified tests pass.
 - Use Makefile targets for validation and capture long outputs with `tee`.
 - Use en-GB-oxendict spelling in docs and comments.
 
-## Tolerances (Exception Triggers)
+## Tolerances (exception triggers)
 
 - Scope: if implementation requires changes to more than 12 files or more than
   900 net new lines, stop and ask for guidance.
@@ -91,7 +91,7 @@ in tmux via `#(dbar)` and all specified tests pass.
 - [x] Run formatting, lint, and test gates.
 - [x] Commit changes.
 
-## Surprises & Discoveries
+## Surprises & discoveries
 
 - Observation: running `make fmt` reformats multiple existing docs and
   `src/main.rs`, creating unrelated diffs. Evidence: `git status --short` shows
@@ -126,7 +126,7 @@ in tmux via `#(dbar)` and all specified tests pass.
   branch rebuilds `Cargo.lock` against the merged `Cargo.toml` and keeps the
   lock file tracked so reproducible builds stay available.
 
-## Decision Log
+## Decision log
 
 - Decision: plan to emit tmux style codes (not ANSI) while using the same
   palette values as `claude-status`. Rationale: tmux renders its own style
@@ -163,7 +163,7 @@ in tmux via `#(dbar)` and all specified tests pass.
   committed lock reflects the post-rebase state. Date/Author: 2026-07-08 /
   Codex
 
-## Outcomes & Retrospective
+## Outcomes & retrospective
 
 Implemented a tmux status line renderer with install support, git metadata, PR
 lookup caching, and tmux context probing. Added unit tests, rstest-bdd
@@ -178,7 +178,7 @@ The lock file is now kept under version control and was regenerated against
 the merged `Cargo.toml` so the committed `Cargo.lock` matches the
 post-rebase dependency set.
 
-## Context and Orientation
+## Context and orientation
 
 The repository currently contains a single binary with a stub `main` in
 `src/main.rs`. There are no existing modules or tests. The aesthetic reference
@@ -190,7 +190,7 @@ must be mirrored. The tmux status line protocol and quoting guidance live in
 test patterns are in `docs/rstest-bdd-users-guide.md`, and dependency-injection
 expectations are in `docs/reliable-testing-in-rust-via-dependency-injection.md`.
 
-## Plan of Work
+## Plan of work
 
 Stage A: confirm requirements and desired output. Read
 `~/.local/bin/claude-status`, capture glyphs, palette numbers, and segment
@@ -221,7 +221,7 @@ logical change.
 
 Each stage ends with validation before moving on.
 
-## Concrete Steps
+## Concrete steps
 
 All commands run from `/data/leynos/Projects/dbar`.
 
@@ -247,7 +247,7 @@ All commands run from `/data/leynos/Projects/dbar`.
     - cap-std
     - thiserror (typed errors)
     - directories
-    - mockable (dev)
+    - mockable
     - mockall (dev)
     - rstest (dev)
     - rstest-bdd + rstest-bdd-macros (dev)
@@ -281,7 +281,7 @@ All commands run from `/data/leynos/Projects/dbar`.
    - `make lint | tee /tmp/dbar-lint.log`
    - `make test | tee /tmp/dbar-test.log`
 
-## Validation and Acceptance
+## Validation and acceptance
 
 Behavioural acceptance:
 
@@ -304,13 +304,13 @@ Quality criteria:
 - Formatting: `make check-fmt` passes; `make fmt` and `make markdownlint` pass
   when docs are touched.
 
-## Idempotence and Recovery
+## Idempotence and recovery
 
 All steps are additive. If a step fails, fix the issue and re-run the same
 command. Avoid destructive git operations. Keep temporary test repos confined
 to temp directories created per test and cleaned automatically by `tempfile`.
 
-## Artefacts and Notes
+## Artefacts and notes
 
 Expected tmux usage snippet (final doc should include something like this):
 
@@ -320,7 +320,7 @@ Example status output (illustrative; exact values depend on repo state):
 
     <project segment> <branch segment> <pr segment> <tmux segment>
 
-## Interfaces and Dependencies
+## Interfaces and dependencies
 
 Proposed core interfaces (final names may adjust to fit codebase):
 
