@@ -171,15 +171,27 @@ mod tests {
     use super::*;
     use camino::Utf8PathBuf;
     use mockable::DefaultClock;
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
     use tempfile::TempDir;
 
+    /// A temporary directory and a cache-file path within it.
+    type CachePath = Result<(TempDir, Utf8PathBuf), CacheError>;
+
+    /// Create a temporary directory and a cache path with the given file name.
+    ///
+    /// The `TempDir` is returned alongside the path so callers keep it alive
+    /// for the duration of the test.
+    #[fixture]
+    fn cache_path(#[default("cache.json")] name: &str) -> CachePath {
+        let temp_dir = TempDir::new().map_err(CacheError::Io)?;
+        let path = Utf8PathBuf::from_path_buf(temp_dir.path().join(name))
+            .map_err(|_| CacheError::InvalidUtf8)?;
+        Ok((temp_dir, path))
+    }
+
     #[rstest]
-    fn cache_round_trip() {
-        let temp_dir = TempDir::new().expect("temp dir");
-        let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("cache.json"))
-            .map_err(|_| CacheError::InvalidUtf8)
-            .expect("cache path");
+    fn cache_round_trip(cache_path: CachePath) {
+        let (_temp_dir, path) = cache_path.expect("cache path");
         let clock = DefaultClock;
         store_cached_value(&path, &clock, "123").expect("write cache");
         let value = load_cached_value(&path, &clock, CacheTtlSeconds::new(60)).expect("read cache");
@@ -187,11 +199,8 @@ mod tests {
     }
 
     #[rstest]
-    fn cache_expires_when_ttl_passed() {
-        let temp_dir = TempDir::new().expect("temp dir");
-        let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("expired.json"))
-            .map_err(|_| CacheError::InvalidUtf8)
-            .expect("cache path");
+    fn cache_expires_when_ttl_passed(#[with("expired.json")] cache_path: CachePath) {
+        let (_temp_dir, path) = cache_path.expect("cache path");
         let payload_json = serde_json::json!({
             "value": "999",
             "updated_at": 0
@@ -204,13 +213,10 @@ mod tests {
     }
 
     #[rstest]
-    fn concurrent_writes_never_expose_partial_json() {
+    fn concurrent_writes_never_expose_partial_json(cache_path: CachePath) {
         use std::sync::{Arc, Barrier};
 
-        let temp_dir = TempDir::new().expect("temp dir");
-        let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("cache.json"))
-            .map_err(|_| CacheError::InvalidUtf8)
-            .expect("cache path");
+        let (_temp_dir, path) = cache_path.expect("cache path");
 
         let writers: usize = 8;
         let barrier = Arc::new(Barrier::new(writers));

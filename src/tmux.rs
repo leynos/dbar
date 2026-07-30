@@ -76,3 +76,112 @@ fn query_tmux(runner: &dyn CommandRunner) -> Option<(String, String, String, Str
     let socket = parts.next().unwrap_or_default().to_owned();
     Some((session, window, pane, socket))
 }
+
+#[cfg(test)]
+mod tests {
+    //! Tests for tmux context resolution and `display-message` parsing.
+    use super::*;
+    use crate::command::{CommandError, CommandOutput};
+    use rstest::rstest;
+
+    /// A runner that returns one canned stdout, or fails when none is set.
+    #[derive(Default)]
+    struct StubRunner {
+        stdout: Option<String>,
+    }
+
+    impl StubRunner {
+        fn with_stdout(stdout: &str) -> Self {
+            Self {
+                stdout: Some(stdout.to_owned()),
+            }
+        }
+    }
+
+    impl CommandRunner for StubRunner {
+        fn run(&self, _spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
+            self.stdout.as_ref().map_or(
+                Err(CommandError::NonZero {
+                    status: Some(1),
+                    stderr: String::new(),
+                }),
+                |stdout| {
+                    Ok(CommandOutput {
+                        stdout: stdout.clone(),
+                    })
+                },
+            )
+        }
+    }
+
+    fn context_of(session: &str, window: &str, pane: &str, socket: &str) -> TmuxContext {
+        TmuxContext {
+            session: Some(session.to_owned()),
+            window: Some(window.to_owned()),
+            pane: Some(pane.to_owned()),
+            socket: Some(socket.to_owned()),
+        }
+    }
+
+    #[rstest]
+    fn resolve_context_short_circuits_when_complete() {
+        // A runner with no canned output errors if consulted, proving the
+        // complete context short-circuits before querying tmux.
+        let runner = StubRunner::default();
+        let context = context_of("sess", "1", "%0", "/tmp/sock");
+        let resolved = resolve_context(&runner, context);
+        assert_eq!(resolved.session.as_deref(), Some("sess"));
+        assert_eq!(resolved.socket.as_deref(), Some("/tmp/sock"));
+    }
+
+    #[rstest]
+    fn resolve_context_fills_missing_fields() {
+        let runner = StubRunner::with_stdout("sess|1|%0|/tmp/sock\n");
+        let resolved = resolve_context(&runner, TmuxContext::default());
+        assert_eq!(resolved.session.as_deref(), Some("sess"));
+        assert_eq!(resolved.window.as_deref(), Some("1"));
+        assert_eq!(resolved.pane.as_deref(), Some("%0"));
+        // The trailing newline must not survive into the socket field.
+        assert_eq!(resolved.socket.as_deref(), Some("/tmp/sock"));
+    }
+
+    #[rstest]
+    fn resolve_context_preserves_prepopulated_fields() {
+        let runner = StubRunner::with_stdout("other|9|%9|/tmp/other");
+        let context = TmuxContext {
+            session: Some("mine".to_owned()),
+            ..TmuxContext::default()
+        };
+        let resolved = resolve_context(&runner, context);
+        assert_eq!(resolved.session.as_deref(), Some("mine"));
+        assert_eq!(resolved.window.as_deref(), Some("9"));
+    }
+
+    #[rstest]
+    fn resolve_context_ignores_empty_response_fields() {
+        let runner = StubRunner::with_stdout("sess||%0|");
+        let resolved = resolve_context(&runner, TmuxContext::default());
+        assert_eq!(resolved.session.as_deref(), Some("sess"));
+        assert_eq!(resolved.window, None);
+        assert_eq!(resolved.pane.as_deref(), Some("%0"));
+        assert_eq!(resolved.socket, None);
+    }
+
+    #[rstest]
+    #[case::short_output("sess|1")]
+    #[case::empty_output("")]
+    fn resolve_context_handles_malformed_output(#[case] stdout: &str) {
+        let runner = StubRunner::with_stdout(stdout);
+        let resolved = resolve_context(&runner, TmuxContext::default());
+        // Malformed output must leave the context untouched, not panic.
+        assert_eq!(resolved.session, None);
+        assert_eq!(resolved.window, None);
+    }
+
+    #[rstest]
+    fn resolve_context_tolerates_command_failure() {
+        let runner = StubRunner::default();
+        let resolved = resolve_context(&runner, TmuxContext::default());
+        assert_eq!(resolved.session, None);
+    }
+}

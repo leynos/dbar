@@ -176,3 +176,118 @@ fn pr_cache_path(cache_dir: &Utf8PathBuf, branch: &str, project_dir: &Utf8PathBu
     let digest = hasher.finish();
     cache_dir.join(format!("pr_{digest:016x}.json"))
 }
+
+#[cfg(test)]
+mod tests {
+    //! Tests for PR lookup caching, cache-key uniqueness, and clock rendering.
+    use super::*;
+    use crate::command::CommandError;
+    use crate::github::GitHubError;
+    use crate::types::CacheTtlSeconds;
+    use mockable::DefaultClock;
+    use rstest::rstest;
+    use tempfile::TempDir;
+
+    /// A client whose lookup always fails, standing in for a network error.
+    struct FailingGitHubClient;
+
+    impl GitHubClient for FailingGitHubClient {
+        fn pr_number(
+            &self,
+            _project_dir: &camino::Utf8Path,
+            _branch: &str,
+        ) -> Result<Option<PrNumber>, GitHubError> {
+            Err(GitHubError::Command(CommandError::NonZero {
+                status: Some(1),
+                stderr: "gh failed".to_owned(),
+            }))
+        }
+    }
+
+    #[rstest]
+    fn failed_lookup_does_not_write_a_cache_entry() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let cache_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
+            .expect("cache dir is not utf8");
+        let project_dir = Utf8PathBuf::from("/projects/demo");
+        let args = StatusArgs {
+            cache_dir: Some(cache_dir.clone()),
+            pr_cache_ttl_seconds: CacheTtlSeconds::new(60),
+            ..StatusArgs::default()
+        };
+        let clock = DefaultClock;
+        let github = FailingGitHubClient;
+
+        // The branch fallback still applies, so a `pr/7` branch yields 7 ...
+        let pr = pr_number(&PrLookup {
+            args: &args,
+            clock: &clock,
+            github: &github,
+            project_dir: &project_dir,
+            branch: "pr/7",
+        });
+        assert_eq!(pr.map(|value| value.to_string()).as_deref(), Some("7"));
+
+        // ... but a failed lookup must not be cached for the whole TTL.
+        let cache_file = pr_cache_path(&cache_dir, "pr/7", &project_dir);
+        assert!(!cache_file.as_std_path().exists());
+    }
+
+    #[rstest]
+    #[case("/projects/demo", "feature/a", "/projects/demo", "feature-a")]
+    #[case("/projects/a_b", "c", "/projects/a", "b_c")]
+    #[case("/projects/one", "main", "/projects/two", "main")]
+    fn distinct_inputs_produce_distinct_cache_paths(
+        #[case] left_dir: &str,
+        #[case] left_branch: &str,
+        #[case] right_dir: &str,
+        #[case] right_branch: &str,
+    ) {
+        let cache_dir = Utf8PathBuf::from("/cache");
+        let left = pr_cache_path(&cache_dir, left_branch, &Utf8PathBuf::from(left_dir));
+        let right = pr_cache_path(&cache_dir, right_branch, &Utf8PathBuf::from(right_dir));
+        assert_ne!(left, right);
+    }
+
+    #[rstest]
+    fn identical_inputs_produce_a_stable_cache_path() {
+        let cache_dir = Utf8PathBuf::from("/cache");
+        let project_dir = Utf8PathBuf::from("/projects/demo");
+        let first = pr_cache_path(&cache_dir, "main", &project_dir);
+        let second = pr_cache_path(&cache_dir, "main", &project_dir);
+        assert_eq!(first, second);
+    }
+
+    #[rstest]
+    #[case::dangling_percent("%")]
+    #[case::unknown_directive("%Q")]
+    fn invalid_clock_format_returns_an_error(#[case] clock_format: &str) {
+        let args = StatusArgs {
+            show_clock: Some(true),
+            clock_format: clock_format.to_owned(),
+            ..StatusArgs::default()
+        };
+        let clock = DefaultClock;
+        // Must surface a typed error rather than panicking inside `to_string`.
+        assert!(render_clock(&args, &clock).is_err());
+    }
+
+    #[rstest]
+    fn valid_clock_format_renders() {
+        let args = StatusArgs {
+            show_clock: Some(true),
+            clock_format: "%H:%M".to_owned(),
+            ..StatusArgs::default()
+        };
+        let clock = DefaultClock;
+        let label = render_clock(&args, &clock).expect("valid format renders");
+        assert!(label.is_some_and(|value| value.contains(':')));
+    }
+
+    #[rstest]
+    fn clock_is_absent_when_disabled() {
+        let args = StatusArgs::default();
+        let clock = DefaultClock;
+        assert_eq!(render_clock(&args, &clock).expect("no clock"), None);
+    }
+}

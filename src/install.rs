@@ -223,11 +223,15 @@ mod tests {
     //! Behavioural tests for tmux snippet installation, idempotence, and layout.
     use super::*;
     use camino::Utf8PathBuf;
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
     use tempfile::TempDir;
 
+    /// A temporary directory and the `tmux.conf` path within it.
+    type Workspace = Result<(TempDir, Utf8PathBuf), InstallError>;
+
     /// Create a temporary directory and the `tmux.conf` path within it.
-    fn workspace() -> Result<(TempDir, Utf8PathBuf), InstallError> {
+    #[fixture]
+    fn workspace() -> Workspace {
         let temp_dir = TempDir::new().map_err(InstallError::Io)?;
         let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("tmux.conf"))
             .map_err(|_| InstallError::MissingFileName)?;
@@ -235,8 +239,8 @@ mod tests {
     }
 
     #[rstest]
-    fn install_writes_snippet() {
-        let (_temp_dir, path) = workspace().expect("workspace");
+    fn install_writes_snippet(workspace: Workspace) {
+        let (_temp_dir, path) = workspace.expect("workspace");
         let initial = "set -g status on\n";
         write(&path, initial).expect("write config");
 
@@ -251,8 +255,8 @@ mod tests {
     }
 
     #[rstest]
-    fn install_is_idempotent() {
-        let (_temp_dir, path) = workspace().expect("workspace");
+    fn install_is_idempotent(workspace: Workspace) {
+        let (_temp_dir, path) = workspace.expect("workspace");
         let _ = install(Some(path.clone()), StatusPosition::Right, false, false)
             .expect("install snippet");
         let second = install(Some(path.clone()), StatusPosition::Right, false, false)
@@ -261,8 +265,8 @@ mod tests {
     }
 
     #[rstest]
-    fn install_full_adds_client_width() {
-        let (_temp_dir, path) = workspace().expect("workspace");
+    fn install_full_adds_client_width(workspace: Workspace) {
+        let (_temp_dir, path) = workspace.expect("workspace");
         let outcome =
             install(Some(path), StatusPosition::Left, true, true).expect("install snippet");
         assert!(outcome.snippet.contains("--client-width #{q:client_width}"));
@@ -270,8 +274,8 @@ mod tests {
     }
 
     #[rstest]
-    fn install_right_enables_clock() {
-        let (_temp_dir, path) = workspace().expect("workspace");
+    fn install_right_enables_clock(workspace: Workspace) {
+        let (_temp_dir, path) = workspace.expect("workspace");
         let outcome =
             install(Some(path), StatusPosition::Right, true, false).expect("install snippet");
         assert!(outcome.snippet.contains("--show-clock true"));
@@ -279,16 +283,16 @@ mod tests {
     }
 
     #[rstest]
-    fn install_left_omits_clock() {
-        let (_temp_dir, path) = workspace().expect("workspace");
+    fn install_left_omits_clock(workspace: Workspace) {
+        let (_temp_dir, path) = workspace.expect("workspace");
         let outcome =
             install(Some(path), StatusPosition::Left, true, false).expect("install snippet");
         assert!(!outcome.snippet.contains("--show-clock true"));
     }
 
     #[rstest]
-    fn install_dry_run_leaves_missing_parent_absent() {
-        let (temp_dir, _) = workspace().expect("workspace");
+    fn install_dry_run_leaves_missing_parent_absent(workspace: Workspace) {
+        let (temp_dir, _) = workspace.expect("workspace");
         let missing_parent = Utf8PathBuf::from_path_buf(temp_dir.path().join("missing"))
             .expect("missing parent path");
         let config = missing_parent.join("tmux.conf");
@@ -306,8 +310,8 @@ mod tests {
     }
 
     #[rstest]
-    fn install_reports_incomplete_markers() {
-        let (_temp_dir, path) = workspace().expect("workspace");
+    fn install_reports_incomplete_markers(workspace: Workspace) {
+        let (_temp_dir, path) = workspace.expect("workspace");
         // A start marker with no matching end marker must not be rewritten.
         write(&path, &format!("{MARKER_START}\nset -g status-left ''\n")).expect("seed config");
         let err = install(Some(path), StatusPosition::Left, true, false)
