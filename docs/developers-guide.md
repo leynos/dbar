@@ -134,13 +134,13 @@ the next generation run.
 
 ## Testing guidance
 
-Tests are organised in three layers:
+Tests are organized in three layers:
 
 1. Unit tests — `#[cfg(test)] mod tests` blocks colocated with the module
    under test (for example `src/command.rs`, `src/cache.rs`, `src/git.rs`,
    `src/tmux.rs`, `src/render.rs`, `src/status.rs`,
    `src/install/mod.rs`/`src/install/tests.rs`). Cases use `#[rstest]`, with
-   `#[case]` parameterisation for table-style coverage and `#[fixture]` for
+   `#[case]` parameterization for table-style coverage and `#[fixture]` for
    shared setup such as temporary directories.
 2. Behavioural tests — `rstest-bdd` scenarios under `tests/rstest_bdd/`,
    driven by a `.feature` file (`status.feature`) and step implementations
@@ -166,7 +166,7 @@ and `#[rstest]` function bodies specifically. In practice, for files under
   in an `rstest-bdd` `#[fixture]`, whose return type is fixed by the
   framework; see `world()` in `tests/rstest_bdd/status_steps.rs`).
 - Every `#[cfg(test)] mod tests` block needs a `//!` inner doc comment
-  summarising what the module's tests cover, matching the crate-wide
+  summarizing what the module's tests cover, matching the crate-wide
   `missing_docs` lint.
 - No source module — test or production — may exceed 400 lines; split
   large modules by feature rather than suppressing the limit.
