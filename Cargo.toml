@@ -20,8 +20,6 @@ wait-timeout = "0.2.1"
 [dev-dependencies]
 assert_cmd = "2.1.1"
 insta = "1.46.0"
-mockall = "0.14.0"
-predicates = "3.1.3"
 rstest = "0.26.1"
 rstest-bdd = "0.3.2"
 rstest-bdd-macros = "0.3.2"

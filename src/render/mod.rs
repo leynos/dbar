@@ -118,7 +118,7 @@ fn render_project_segment(project: &ProjectName) -> String {
     let segment = format!(
         "{} {} {}{}{}{}",
         style(Some(COLOUR_PROJECT_FG), Some(COLOUR_PROJECT_BG)),
-        project,
+        escape_tmux(project.as_ref()),
         reset_bg_with_fg(COLOUR_PROJECT_BG),
         GLYPH_FADE_RIGHT,
         style(None, None),
@@ -137,7 +137,7 @@ fn render_branch_segment(status: &GitStatus) -> String {
         "{}{} {}",
         style(Some(branch_colour), None),
         GLYPH_BRANCH,
-        status.branch
+        escape_tmux(status.branch.as_ref())
     )];
 
     let mut indicators = Vec::new();
@@ -189,10 +189,13 @@ fn render_branch_segment(status: &GitStatus) -> String {
 
 fn render_pr_segment(pr: &PrNumber) -> String {
     format!(
-        "{}{} #{}{}",
+        // The literal `#` prefix is escaped too: an unescaped `#` immediately
+        // followed by a hostile PR value starting with `{` would otherwise
+        // form a `#{...}` format sequence.
+        "{}{} ##{}{}",
         style(Some(COLOUR_PR), None),
         GLYPH_PR,
-        pr,
+        escape_tmux(&pr.to_string()),
         reset()
     )
 }
@@ -211,7 +214,7 @@ fn render_tmux_segment(context: &TmuxContext) -> Option<String> {
     let window = context.window.as_deref().unwrap_or("-");
     let pane = context.pane.as_deref().unwrap_or("-");
 
-    let label = format!("{session}:{window}.{pane}");
+    let label = escape_tmux(&format!("{session}:{window}.{pane}"));
 
     Some(format!(
         "{}{} {}{}",
@@ -227,7 +230,7 @@ fn render_clock_segment(clock: &str) -> String {
         "{}{} {}{}",
         style(Some(COLOUR_PROJECT_FG), None),
         GLYPH_CLOCK,
-        clock,
+        escape_tmux(clock),
         reset()
     )
 }
@@ -247,10 +250,26 @@ fn layout_with_width(left: &str, right: &str, width: usize) -> String {
     output
 }
 
+/// Escape a dynamic value so tmux renders it literally.
+///
+/// tmux treats `#` as the introducer for styles (`#[...]`), formats (`#{...}`)
+/// and commands (`#(...)`) in the output it substitutes into the status line.
+/// Doubling `#` is tmux's documented literal-`#` escape, so a hostile branch
+/// name or path cannot inject markup into the rendered segment.
+fn escape_tmux(value: &str) -> String {
+    value.replace('#', "##")
+}
+
 fn visible_width(value: &str) -> usize {
     let mut width = 0;
     let mut chars = value.chars().peekable();
     while let Some(ch) = chars.next() {
+        // `##` is an escaped literal `#`, occupying a single column.
+        if ch == '#' && matches!(chars.peek(), Some('#')) {
+            chars.next();
+            width += 1;
+            continue;
+        }
         if ch == '#' && matches!(chars.peek(), Some('[')) {
             skip_style(&mut chars);
             continue;
@@ -289,67 +308,4 @@ const fn reset() -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
-    //! Tests for status-line rendering, style tags, and glyph emission.
-    use super::*;
-    use crate::types::{AheadCount, BehindCount, BranchName, PrNumber, ProjectName};
-
-    #[test]
-    fn render_includes_branch_and_pr() {
-        let project = ProjectName::new("demo");
-        let status = GitStatus {
-            branch: BranchName::new("main"),
-            dirty: false,
-            staged: false,
-            ahead: AheadCount::new(0),
-            behind: BehindCount::new(0),
-            is_worktree: false,
-        };
-        let tmux = TmuxContext {
-            session: Some("session".into()),
-            window: Some("1".into()),
-            pane: Some("%0".into()),
-            socket: None,
-        };
-        let pr = PrNumber::new("17");
-        let context = RenderContext {
-            project: &project,
-            git_status: Some(&status),
-            pr_number: Some(&pr),
-            tmux: Some(&tmux),
-            clock: None,
-            client_width: None,
-        };
-        let line = render_status_line(&context);
-        assert!(line.contains("main"));
-        assert!(line.contains("#17"));
-    }
-
-    #[test]
-    fn layout_right_justifies_with_width() {
-        let output = layout_with_width("left", "right", 12);
-        assert_eq!(output, "left   right");
-    }
-
-    #[test]
-    fn render_places_clock_after_tmux_on_right() {
-        let project = ProjectName::new("demo");
-        let tmux = TmuxContext {
-            session: Some("session".into()),
-            window: Some("1".into()),
-            pane: Some("%0".into()),
-            socket: None,
-        };
-        let context = RenderContext {
-            project: &project,
-            git_status: None,
-            pr_number: None,
-            tmux: Some(&tmux),
-            clock: Some("09:41"),
-            client_width: None,
-        };
-        let line = render_status_line(&context);
-        assert!(line.contains("session:1.%0"));
-        assert!(line.ends_with(" 09:41#[default]"));
-    }
-}
+mod tests;

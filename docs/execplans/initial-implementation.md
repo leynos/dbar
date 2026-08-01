@@ -322,28 +322,56 @@ Example status output (illustrative; exact values depend on repo state):
 
 ## Interfaces and dependencies
 
-Proposed core interfaces (final names may adjust to fit codebase):
+The plan is COMPLETE; the interfaces below reflect what was delivered, not
+the speculative names drafted before implementation began.
 
-- `dbar::config::DbarConfig`: `#[derive(OrthoConfig)]` struct with fields
-  `project_dir: Option<Utf8PathBuf>`, `show_pr: bool`, `style: StyleMode`, and
-  `tmux_format: TmuxFormat` (or similar), plus cache settings.
-- `dbar::status::build_status_line(ctx: &StatusContext) -> StatusLine`:
-  returns a rendered string or a struct with `render()`.
-- `dbar::git::GitProbe`: trait with methods to read branch, status, upstream
-  counts, and worktree detection, with a real implementation using `git`.
-- `dbar::tmux::TmuxProbe`: trait or helper that extracts session/pane/socket
-  info from environment or `tmux display-message` output.
-- `dbar::render`: renderer that applies `claude-status` palette and glyphs and
-  emits tmux `#[fg=colourNN]`/`#[bg=colourNN]` styling.
-- `dbar::install::TmuxInstaller`: helper that writes a tmux snippet using
-  markers and returns a summary of changes.
-- `dbar::cache`: helper that resolves the XDG cache path and manages cached
-  lookup files.
+Delivered core interfaces:
 
-Planned dependencies (subject to `cargo search` for versions):
+- `dbar::config::StatusArgs` / `dbar::config::InstallArgs`:
+  `#[derive(OrthoConfig)]` structs parsed by `clap` and merged from CLI/env
+  by `ortho_config`, covering `project_dir`, `client_width`, `session`,
+  `window`, `pane`, `socket`, `show_pr`, `show_clock`, `clock_format`,
+  `github_mock_pr`, `pr_cache_ttl_seconds`, and `cache_dir` (status), and
+  `path`, `dry_run`, `full`, and `position` (install).
+  `dbar::config::load_command() -> Result<DbarCommand, Arc<OrthoError>>`
+  parses and merges the selected subcommand.
+- `dbar::status::build_status_line(args: &StatusArgs, runner: &dyn
+  CommandRunner, clock: &dyn Clock, github: &dyn GitHubClient) ->
+  Result<String, DbarError>`: assembles and returns the rendered status
+  line; there is no separate `StatusContext`/`StatusLine` type.
+- `dbar::command::CommandRunner`: trait executing a `CommandSpec` and
+  returning a `CommandOutput`, implemented by `RealCommandRunner`. This
+  seam was not anticipated in the original plan; `git`, `tmux`, and GitHub
+  probing all depend on it for hermetic testing.
+- `dbar::git::project_name` / `dbar::git::git_status`: free functions that
+  read branch, dirty/staged state, upstream counts, and worktree detection
+  through a `&dyn CommandRunner`; there is no `GitProbe` trait.
+- `dbar::tmux::resolve_context(runner: &dyn CommandRunner, context:
+  TmuxContext) -> TmuxContext`: free function that fills in missing
+  session/window/pane/socket fields from `tmux display-message` output;
+  there is no `TmuxProbe` trait.
+- `dbar::render::render_status_line(context: &RenderContext) -> String`:
+  renderer that applies the `claude-status` palette and glyphs and emits
+  tmux `#[fg=colourNN]`/`#[bg=colourNN]` styling.
+- `dbar::install::install(path: Option<Utf8PathBuf>, position:
+  StatusPosition, dry_run: bool, full: bool) -> Result<InstallOutcome,
+  InstallError>`: free function that writes a marker-delimited tmux
+  snippet and returns a summary of changes; there is no `TmuxInstaller`
+  type.
+- `dbar::cache::{resolve_cache_dir, load_cached_value,
+  store_cached_value}`: helpers that resolve the XDG cache path and manage
+  cached lookup files, as planned.
+- `dbar::github::GitHubClient`: trait for PR lookup, implemented by
+  `GhCliClient` (backed by the `gh` CLI via `CommandRunner`) and
+  `MockGitHubClient` (a fixed value, wired up via `--github-mock-pr`).
+  Like `CommandRunner`, this seam was not anticipated in the original
+  plan.
+
+Delivered dependencies:
 
 - runtime: `ortho_config`, `serde`, `serde_json`, `camino`, `cap-std`,
-  `thiserror`, `directories`, `mockable`, `clap`
+  `thiserror`, `directories`, `mockable`, `clap`, `rustix`,
+  `unicode-width`, `wait-timeout`
 - dev: `rstest`, `rstest-bdd`, `rstest-bdd-macros`, `mockall`, `assert_cmd`,
   `insta`, `tempfile`, `predicates`
 
@@ -367,3 +395,9 @@ progress updates.
 Revised 2026-01-05 to mark the plan complete with final outcomes.
 
 Revised 2026-01-05 to document the pane current path update.
+
+Revised 2026-08-01 to correct "Interfaces and dependencies" so it lists the
+delivered `CommandRunner`/`GitHubClient` interfaces, free-function probing
+API, and full runtime dependency list, replacing speculative interface
+names (`DbarConfig`, `StatusContext`/`StatusLine`, `GitProbe`, `TmuxProbe`,
+`TmuxInstaller`) that were never implemented.
