@@ -1,5 +1,6 @@
 //! tmux configuration installation helpers.
 
+use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use camino::Utf8Path;
@@ -190,6 +191,7 @@ fn write(path: &Utf8Path, contents: &str) -> Result<(), InstallError> {
     let tmp_name = format!("{file_name}.{}.{unique}.tmp", std::process::id());
     let result = dir
         .write(tmp_name.as_str(), contents.as_bytes())
+        .and_then(|()| inherit_target_permissions(&dir, tmp_name.as_str(), file_name))
         .and_then(|()| dir.rename(tmp_name.as_str(), &dir, file_name));
     if result.is_err() {
         // Best-effort cleanup; surface the original error, not the removal's.
@@ -197,6 +199,19 @@ fn write(path: &Utf8Path, contents: &str) -> Result<(), InstallError> {
     }
     result?;
     Ok(())
+}
+
+/// Copy the target's permissions onto the freshly written temp file.
+///
+/// `Dir::write` creates the temp file with default (umask-derived) permissions,
+/// so renaming it over the target would otherwise widen a hardened config such
+/// as a `0600` `tmux.conf`. A missing target leaves the defaults in place.
+fn inherit_target_permissions(dir: &Dir, tmp_name: &str, file_name: &str) -> io::Result<()> {
+    match dir.metadata(file_name) {
+        Ok(metadata) => dir.set_permissions(tmp_name, metadata.permissions()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
 }
 
 fn split_parent(path: &Utf8Path) -> Result<(&Utf8Path, &str), InstallError> {
@@ -301,6 +316,31 @@ mod tests {
         assert!(outcome.dry_run);
         // The parent directory must not have been created by the dry run.
         assert!(Dir::open_ambient_dir(missing_parent.as_path(), ambient_authority()).is_err());
+    }
+
+    #[rstest]
+    #[cfg(unix)]
+    fn install_preserves_restrictive_permissions(workspace: Workspace) {
+        use cap_std::fs_utf8::{Permissions, PermissionsExt as _};
+
+        let (_temp_dir, path) = workspace.expect("workspace");
+        write(&path, "set -g status on\n").expect("write config");
+
+        let (dir, file_name) = open_parent_for_read(&path).expect("open parent");
+        dir.set_permissions(file_name, Permissions::from_mode(0o600))
+            .expect("restrict config to 0600");
+
+        let outcome = install(Some(path.clone()), StatusPosition::Right, false, false)
+            .expect("install snippet");
+        assert!(outcome.updated);
+
+        let mode = dir
+            .metadata(file_name)
+            .expect("stat config")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "install must not widen existing permissions");
     }
 
     #[rstest]

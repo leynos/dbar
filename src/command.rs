@@ -1,7 +1,7 @@
 //! Command execution helpers for git and tmux probes.
 
 use std::io::{self, Read};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -162,6 +162,41 @@ fn join_reader(handle: JoinHandle<io::Result<Vec<u8>>>) -> Result<Vec<u8>, Comma
     Ok(bytes)
 }
 
+/// Put the child in its own process group so its descendants can be signalled
+/// as a unit.
+#[cfg(unix)]
+fn use_own_process_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt as _;
+    command.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn use_own_process_group(_command: &mut Command) {}
+
+/// Terminate the child and every descendant sharing its process group.
+///
+/// Signalling only the direct child would leave a backgrounded grandchild
+/// holding the inherited pipe write end open, so the reader threads would never
+/// observe EOF and the timeout would block instead of returning.
+#[cfg(unix)]
+fn terminate_child_tree(child: &mut Child) -> Result<(), CommandError> {
+    let raw = i32::try_from(child.id())
+        .map_err(|_| io::Error::other("child pid does not fit in a process id"))?;
+    let pid = rustix::process::Pid::from_raw(raw)
+        .ok_or_else(|| io::Error::other("child pid is not a valid process id"))?;
+    rustix::process::kill_process_group(pid, rustix::process::Signal::KILL)
+        .map_err(io::Error::from)?;
+    child.wait()?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn terminate_child_tree(child: &mut Child) -> Result<(), CommandError> {
+    child.kill()?;
+    child.wait()?;
+    Ok(())
+}
+
 impl CommandRunner for RealCommandRunner {
     fn run(&self, spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
         let mut command = Command::new(&spec.program);
@@ -173,6 +208,7 @@ impl CommandRunner for RealCommandRunner {
         if let Some(cwd) = &spec.cwd {
             command.current_dir(cwd.as_std_path());
         }
+        use_own_process_group(&mut command);
         let timeout = spec.timeout.unwrap_or(DEFAULT_TIMEOUT);
         let mut child = command.spawn()?;
 
@@ -183,11 +219,12 @@ impl CommandRunner for RealCommandRunner {
         let stderr_reader = spawn_reader(take_pipe(child.stderr.take())?);
 
         let Some(status) = child.wait_timeout(timeout)? else {
-            child.kill()?;
-            child.wait()?;
-            // Killing the child closes its pipes, so the readers reach EOF and
-            // finish; join them to avoid leaking threads, but keep the timeout
-            // as the reported failure.
+            // Kill the whole group: any descendant still holding the inherited
+            // pipe write end would otherwise keep the readers from seeing EOF.
+            terminate_child_tree(&mut child)?;
+            // Every writer is now gone, so the readers finish promptly; join
+            // them to avoid leaking threads, but keep the timeout as the
+            // reported failure.
             drop(join_reader(stdout_reader));
             drop(join_reader(stderr_reader));
             return Err(CommandError::Timeout { timeout });
@@ -212,6 +249,7 @@ mod tests {
     //! Tests for real command execution, timeout handling, and error mapping.
     use super::*;
     use rstest::rstest;
+    use std::time::Instant;
 
     #[rstest]
     fn run_captures_stdout() {
@@ -240,6 +278,31 @@ mod tests {
             .timeout(Duration::from_secs(30));
         let output = runner.run(&spec).expect("large output must not time out");
         assert_eq!(output.stdout.len(), 200_000);
+    }
+
+    #[rstest]
+    fn run_times_out_promptly_despite_a_pipe_inheriting_descendant() {
+        // The direct child stalls past the timeout so the kill path runs, and
+        // it first backgrounds a grandchild that inherits the stdout/stderr
+        // pipes. Killing only the direct child would leave the grandchild
+        // holding the write end, so the readers would never reach EOF and the
+        // join would block instead of returning the timeout.
+        let runner = RealCommandRunner;
+        let spec = CommandSpec::new("sh")
+            .args(["-c", "sleep 30 & sleep 5"])
+            .timeout(Duration::from_millis(200));
+
+        let started = Instant::now();
+        let err = runner
+            .run(&spec)
+            .expect_err("stalled command must time out");
+        let elapsed = started.elapsed();
+
+        assert!(matches!(err, CommandError::Timeout { .. }));
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "timeout must return promptly, took {elapsed:?}"
+        );
     }
 
     #[rstest]

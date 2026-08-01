@@ -84,22 +84,26 @@ mod tests {
     use crate::command::{CommandError, CommandOutput};
     use rstest::rstest;
 
-    /// A runner that returns one canned stdout, or fails when none is set.
+    /// A runner that returns one canned stdout, or fails when none is set, and
+    /// counts how many times it was consulted.
     #[derive(Default)]
     struct StubRunner {
         stdout: Option<String>,
+        calls: std::cell::Cell<usize>,
     }
 
     impl StubRunner {
         fn with_stdout(stdout: &str) -> Self {
             Self {
                 stdout: Some(stdout.to_owned()),
+                ..Self::default()
             }
         }
     }
 
     impl CommandRunner for StubRunner {
         fn run(&self, _spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
+            self.calls.set(self.calls.get() + 1);
             self.stdout.as_ref().map_or(
                 Err(CommandError::NonZero {
                     status: Some(1),
@@ -125,13 +129,15 @@ mod tests {
 
     #[rstest]
     fn resolve_context_short_circuits_when_complete() {
-        // A runner with no canned output errors if consulted, proving the
-        // complete context short-circuits before querying tmux.
+        // Asserting the runner was never consulted is what proves the
+        // short-circuit: returning the context unchanged would also happen if
+        // the runner were called and simply errored.
         let runner = StubRunner::default();
         let context = context_of("sess", "1", "%0", "/tmp/sock");
         let resolved = resolve_context(&runner, context);
         assert_eq!(resolved.session.as_deref(), Some("sess"));
         assert_eq!(resolved.socket.as_deref(), Some("/tmp/sock"));
+        assert_eq!(runner.calls.get(), 0);
     }
 
     #[rstest]

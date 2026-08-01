@@ -409,6 +409,7 @@ dependencies = [
  "rstest",
  "rstest-bdd",
  "rstest-bdd-macros",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

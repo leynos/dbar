@@ -188,8 +188,12 @@ mod tests {
     use rstest::rstest;
     use tempfile::TempDir;
 
-    /// A client whose lookup always fails, standing in for a network error.
-    struct FailingGitHubClient;
+    /// A client whose lookup always fails, standing in for a network error, and
+    /// records how many times it was consulted.
+    #[derive(Default)]
+    struct FailingGitHubClient {
+        calls: std::cell::Cell<usize>,
+    }
 
     impl GitHubClient for FailingGitHubClient {
         fn pr_number(
@@ -197,6 +201,7 @@ mod tests {
             _project_dir: &camino::Utf8Path,
             _branch: &str,
         ) -> Result<Option<PrNumber>, GitHubError> {
+            self.calls.set(self.calls.get() + 1);
             Err(GitHubError::Command(CommandError::NonZero {
                 status: Some(1),
                 stderr: "gh failed".to_owned(),
@@ -216,7 +221,7 @@ mod tests {
             ..StatusArgs::default()
         };
         let clock = DefaultClock;
-        let github = FailingGitHubClient;
+        let github = FailingGitHubClient::default();
 
         // The branch fallback still applies, so a `pr/7` branch yields 7 ...
         let pr = pr_number(&PrLookup {
@@ -227,6 +232,9 @@ mod tests {
             branch: "pr/7",
         });
         assert_eq!(pr.map(|value| value.to_string()).as_deref(), Some("7"));
+        // The lookup must actually have been attempted; otherwise the absent
+        // cache file below would prove nothing.
+        assert_eq!(github.calls.get(), 1);
 
         // ... but a failed lookup must not be cached for the whole TTL.
         let cache_file = pr_cache_path(&cache_dir, "pr/7", &project_dir);
