@@ -179,20 +179,29 @@ fn use_own_process_group(_command: &mut Command) {}
 /// holding the inherited pipe write end open, so the reader threads would never
 /// observe EOF and the timeout would block instead of returning.
 #[cfg(unix)]
-fn terminate_child_tree(child: &mut Child) -> Result<(), CommandError> {
+fn signal_process_group(child: &Child) -> Result<(), CommandError> {
     let raw = i32::try_from(child.id())
         .map_err(|_| io::Error::other("child pid does not fit in a process id"))?;
     let pid = rustix::process::Pid::from_raw(raw)
         .ok_or_else(|| io::Error::other("child pid is not a valid process id"))?;
-    rustix::process::kill_process_group(pid, rustix::process::Signal::KILL)
-        .map_err(io::Error::from)?;
-    child.wait()?;
-    Ok(())
+    match rustix::process::kill_process_group(pid, rustix::process::Signal::KILL) {
+        // An empty group means every descendant has already exited, which is
+        // exactly the state the caller wants; treat it as success.
+        Ok(()) | Err(rustix::io::Errno::SRCH) => Ok(()),
+        Err(err) => Err(CommandError::Io(io::Error::from(err))),
+    }
 }
 
 #[cfg(not(unix))]
+fn signal_process_group(_child: &Child) -> Result<(), CommandError> {
+    Ok(())
+}
+
+/// Terminate the child and every descendant, then reap the direct child.
 fn terminate_child_tree(child: &mut Child) -> Result<(), CommandError> {
+    #[cfg(not(unix))]
     child.kill()?;
+    signal_process_group(child)?;
     child.wait()?;
     Ok(())
 }
@@ -229,6 +238,12 @@ impl CommandRunner for RealCommandRunner {
             drop(join_reader(stderr_reader));
             return Err(CommandError::Timeout { timeout });
         };
+
+        // The direct child has exited, but a descendant it backgrounded may
+        // still hold the inherited pipe write ends. Without releasing the group
+        // the reader joins below would block indefinitely, and this path has no
+        // timeout to fall back on.
+        signal_process_group(&child)?;
 
         let stdout_bytes = join_reader(stdout_reader)?;
         let stderr_bytes = join_reader(stderr_reader)?;
@@ -278,6 +293,28 @@ mod tests {
             .timeout(Duration::from_secs(30));
         let output = runner.run(&spec).expect("large output must not time out");
         assert_eq!(output.stdout.len(), 200_000);
+    }
+
+    #[rstest]
+    fn run_returns_promptly_when_a_descendant_outlives_the_child() {
+        // The direct child exits immediately, so the timeout path never runs,
+        // but it leaves a backgrounded grandchild holding the inherited pipes.
+        // Without releasing the process group the reader joins would block for
+        // the grandchild's whole lifetime with no timeout to rescue them.
+        let runner = RealCommandRunner;
+        let spec = CommandSpec::new("sh")
+            .args(["-c", "sleep 30 & exit 0"])
+            .timeout(Duration::from_secs(20));
+
+        let started = Instant::now();
+        let output = runner.run(&spec).expect("child exits successfully");
+        let elapsed = started.elapsed();
+
+        assert!(output.stdout.is_empty());
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "run() must not wait on a surviving descendant, took {elapsed:?}"
+        );
     }
 
     #[rstest]

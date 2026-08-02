@@ -86,7 +86,10 @@ pub fn install(
     let (updated, contents) = apply_snippet(&existing, &snippet)?;
     let backup_path = if should_back_up(updated, dry_run, &existing) {
         let backup = backup_path_for(&config_path);
-        write(&backup, &existing)?;
+        // The backup holds the config's contents, so it must inherit the
+        // config's mode rather than the backup path's own (absent) mode.
+        let (_, config_file_name) = split_parent(&config_path)?;
+        write_inheriting(&backup, &existing, config_file_name)?;
         Some(backup)
     } else {
         None
@@ -183,6 +186,21 @@ fn read_to_string(path: &Utf8Path) -> Result<String, InstallError> {
 }
 
 fn write(path: &Utf8Path, contents: &str) -> Result<(), InstallError> {
+    let (_, file_name) = split_parent(path)?;
+    write_inheriting(path, contents, file_name)
+}
+
+/// Write `contents` to `path`, taking permissions from `permissions_from` — a
+/// file name in the same parent directory.
+///
+/// A backup must inherit the mode of the config it copies rather than that of
+/// its own (absent) destination, otherwise a `0600` config yields a
+/// world-readable `0644` backup of the same content.
+fn write_inheriting(
+    path: &Utf8Path,
+    contents: &str,
+    permissions_from: &str,
+) -> Result<(), InstallError> {
     let (dir, file_name) = open_parent_for_write(path)?;
     // Write to a uniquely named temp file, then rename it over the target.
     // `Dir::write` truncates in place, so an interrupted write would otherwise
@@ -191,7 +209,7 @@ fn write(path: &Utf8Path, contents: &str) -> Result<(), InstallError> {
     let tmp_name = format!("{file_name}.{}.{unique}.tmp", std::process::id());
     let result = dir
         .write(tmp_name.as_str(), contents.as_bytes())
-        .and_then(|()| inherit_target_permissions(&dir, tmp_name.as_str(), file_name))
+        .and_then(|()| inherit_permissions_from(&dir, tmp_name.as_str(), permissions_from))
         .and_then(|()| dir.rename(tmp_name.as_str(), &dir, file_name));
     if result.is_err() {
         // Best-effort cleanup; surface the original error, not the removal's.
@@ -206,8 +224,8 @@ fn write(path: &Utf8Path, contents: &str) -> Result<(), InstallError> {
 /// `Dir::write` creates the temp file with default (umask-derived) permissions,
 /// so renaming it over the target would otherwise widen a hardened config such
 /// as a `0600` `tmux.conf`. A missing target leaves the defaults in place.
-fn inherit_target_permissions(dir: &Dir, tmp_name: &str, file_name: &str) -> io::Result<()> {
-    match dir.metadata(file_name) {
+fn inherit_permissions_from(dir: &Dir, tmp_name: &str, source: &str) -> io::Result<()> {
+    match dir.metadata(source) {
         Ok(metadata) => dir.set_permissions(tmp_name, metadata.permissions()),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err),

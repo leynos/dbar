@@ -37,7 +37,7 @@ from `run()` based on the parsed `DbarCommand`.
   resolves the project directory, probes git, looks up (and caches) the PR
   number, resolves tmux context, renders the clock label, and passes
   everything to `render::render_status_line`.
-- `render.rs` — pure rendering: `RenderContext` plus `render_status_line`
+- `render/mod.rs` — pure rendering: `RenderContext` plus `render_status_line`
   assemble the tmux `#[...]` style tags and Powerline-style glyphs into the
   final string, with optional right-alignment to a client width.
 - `types.rs` — domain newtypes (`ProjectName`, `BranchName`, `AheadCount`,
@@ -138,7 +138,7 @@ Tests are organized in three layers:
 
 1. Unit tests — `#[cfg(test)] mod tests` blocks colocated with the module
    under test (for example `src/command.rs`, `src/cache.rs`, `src/git.rs`,
-   `src/tmux.rs`, `src/render.rs`, `src/status.rs`,
+   `src/tmux.rs`, `src/render/mod.rs`, `src/status.rs`,
    `src/install/mod.rs`/`src/install/tests.rs`). Cases use `#[rstest]`, with
    `#[case]` parameterization for table-style coverage and `#[fixture]` for
    shared setup such as temporary directories.

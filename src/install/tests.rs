@@ -101,6 +101,21 @@ fn install_preserves_restrictive_permissions(workspace: Workspace) {
         .mode()
         & 0o777;
     assert_eq!(mode, 0o600, "install must not widen existing permissions");
+
+    // The backup holds the same restricted content, so it must not be written
+    // with the default umask permissions.
+    let backup = outcome.backup_path.expect("backup written");
+    let (backup_dir, backup_name) = open_parent_for_read(&backup).expect("open backup parent");
+    let backup_mode = backup_dir
+        .metadata(backup_name)
+        .expect("stat backup")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(
+        backup_mode, 0o600,
+        "the backup must inherit the config's permissions"
+    );
 }
 
 #[rstest]
