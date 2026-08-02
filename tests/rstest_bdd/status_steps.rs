@@ -38,6 +38,9 @@ fn world() -> World {
     }
 }
 
+// The parameter name is the fixture name that `#[scenario]` exposes to the
+// steps, so it must stay `world`: renaming it to `_world` renames the fixture
+// and every step binding fails to resolve at run time.
 #[scenario("tests/rstest_bdd/status.feature")]
 fn status_scenarios(world: World) {}
 
