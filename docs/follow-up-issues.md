@@ -28,7 +28,7 @@ adapter:
   dependency, which makes the fallback path untestable without mutating
   process-wide state.
 - `cache::load_cached_value` and `cache::store_cached_value` combine cache
-  policy (TTL comparison, key resolution) with JSON serialisation
+  policy (TTL comparison, key resolution) with JSON serialization
   (`serde_json`) and `cap_std`-backed file persistence in the same
   functions, so a policy change (for example, a different eviction rule)
   cannot be tested without also exercising the filesystem.

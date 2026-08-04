@@ -10,7 +10,7 @@ pub enum DbarError {
     Cache(#[from] crate::cache::CacheError),
     /// Configuration loading failed.
     #[error(transparent)]
-    Config(#[from] std::sync::Arc<ortho_config::OrthoError>),
+    Config(#[from] crate::config::ConfigError),
     /// tmux install operations failed.
     #[error(transparent)]
     Install(#[from] crate::install::InstallError),
