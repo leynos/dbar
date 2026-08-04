@@ -234,9 +234,9 @@ All commands run from `/data/leynos/Projects/dbar`.
     src/config.rs
     src/git.rs
     src/tmux.rs
-    src/render.rs
+    src/render/mod.rs
     src/status.rs
-    src/install.rs
+    src/install/mod.rs
     src/cache.rs
 
 3. Add dependencies (exact versions via `cargo search`):
@@ -248,10 +248,9 @@ All commands run from `/data/leynos/Projects/dbar`.
     - thiserror (typed errors)
     - directories
     - mockable
-    - mockall (dev)
     - rstest (dev)
     - rstest-bdd + rstest-bdd-macros (dev)
-    - assert_cmd + insta (+ predicates if needed) (dev)
+    - assert_cmd + insta (dev)
     - tempfile (dev)
 
 4. Add tests:
@@ -314,7 +313,7 @@ to temp directories created per test and cleaned automatically by `tempfile`.
 
 Expected tmux usage snippet (final doc should include something like this):
 
-    set -g status-right '#(dbar status "#{session_name}" "#{window_index}" "#{pane_id}")'
+    set -g status-right '#(dbar status #{q:session_name} #{q:window_index} #{q:pane_id})'
 
 Example status output (illustrative; exact values depend on repo state):
 
@@ -372,8 +371,8 @@ Delivered dependencies:
 - runtime: `ortho_config`, `serde`, `serde_json`, `camino`, `cap-std`,
   `thiserror`, `directories`, `mockable`, `clap`, `rustix`,
   `unicode-width`, `wait-timeout`
-- dev: `rstest`, `rstest-bdd`, `rstest-bdd-macros`, `mockall`, `assert_cmd`,
-  `insta`, `tempfile`, `predicates`
+- dev: `rstest`, `rstest-bdd`, `rstest-bdd-macros`, `assert_cmd`, `insta`,
+  `tempfile`
 
 ## Revision note (required when editing an ExecPlan)
 

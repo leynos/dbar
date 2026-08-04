@@ -262,3 +262,91 @@ impl FromStr for StatusPosition {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Tests for TTL and status-position parsing, defaults, and display.
+    use super::*;
+    use rstest::rstest;
+
+    #[rstest]
+    fn cache_ttl_default_is_sixty_seconds() {
+        assert_eq!(CacheTtlSeconds::default().value(), 60);
+    }
+
+    #[rstest]
+    #[case("0", 0)]
+    #[case("30", 30)]
+    #[case("18446744073709551615", u64::MAX)]
+    fn cache_ttl_parses_valid_values(#[case] input: &str, #[case] expected: u64) {
+        let ttl: CacheTtlSeconds = input.parse().expect("valid ttl");
+        assert_eq!(ttl.value(), expected);
+    }
+
+    #[rstest]
+    #[case::empty("")]
+    #[case::not_a_number("abc")]
+    #[case::negative("-1")]
+    #[case::fractional("1.5")]
+    #[case::overflow("18446744073709551616")]
+    fn cache_ttl_rejects_invalid_values(#[case] input: &str) {
+        let err = input
+            .parse::<CacheTtlSeconds>()
+            .expect_err("invalid ttl must be rejected");
+        assert!(err.starts_with("invalid cache ttl"), "unexpected: {err}");
+    }
+
+    #[rstest]
+    fn cache_ttl_round_trips_through_display() {
+        let ttl = CacheTtlSeconds::new(45);
+        assert_eq!(ttl.to_string(), "45");
+        assert_eq!(
+            ttl.to_string().parse::<CacheTtlSeconds>().expect("reparse"),
+            ttl
+        );
+    }
+
+    #[rstest]
+    #[case("left", StatusPosition::Left)]
+    #[case("Left", StatusPosition::Left)]
+    #[case("right", StatusPosition::Right)]
+    #[case("Right", StatusPosition::Right)]
+    fn status_position_parses_valid_values(#[case] input: &str, #[case] expected: StatusPosition) {
+        assert_eq!(input.parse::<StatusPosition>().expect("valid"), expected);
+    }
+
+    #[rstest]
+    #[case::empty("")]
+    #[case::unknown("middle")]
+    #[case::upper("LEFT")]
+    #[case::padded(" left")]
+    fn status_position_rejects_invalid_values(#[case] input: &str) {
+        let err = input
+            .parse::<StatusPosition>()
+            .expect_err("invalid position must be rejected");
+        assert!(
+            err.starts_with("invalid status position"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[rstest]
+    #[case(StatusPosition::Left, "left")]
+    #[case(StatusPosition::Right, "right")]
+    fn status_position_displays_lowercase(
+        #[case] position: StatusPosition,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(position.to_string(), expected);
+        // Display output must be re-parseable, so the two stay in step.
+        assert_eq!(
+            expected.parse::<StatusPosition>().expect("reparse"),
+            position
+        );
+    }
+
+    #[rstest]
+    fn status_position_defaults_to_left() {
+        assert_eq!(StatusPosition::default(), StatusPosition::Left);
+    }
+}

@@ -204,8 +204,8 @@ Dependencies are pinned with caret requirements. Notable runtime crates:
 `wait-timeout` (bounding child-process execution), `directories` (XDG cache
 resolution), `ortho_config` (layered CLI/env/config parsing), and
 `mockable` (the `Clock` trait used to inject time). Dev-only crates
-(`rstest`, `rstest-bdd`, `rstest-bdd-macros`, `mockall`, `assert_cmd`,
-`insta`, `tempfile`, `predicates`) back the three test layers above.
+(`rstest`, `rstest-bdd`, `rstest-bdd-macros`, `assert_cmd`, `insta`,
+`tempfile`) back the three test layers above.
 
 ### Real command execution
 

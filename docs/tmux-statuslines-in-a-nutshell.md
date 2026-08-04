@@ -291,13 +291,14 @@ not enough: command substitution still runs inside them, so a session,
 window, or pane name containing shell metacharacters remains a
 shell-injection risk.
 
-Bad:
+Insecure — a session name containing shell metacharacters can inject
+commands:
 
 ```tmux
 set -g status-right '#(~/bin/seg #{session_name})'
 ```
 
-Better:
+Safe — the `#{q:...}` modifier escapes the value before the shell sees it:
 
 ```tmux
 set -g status-right '#(~/bin/seg #{q:session_name})'

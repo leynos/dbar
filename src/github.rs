@@ -130,3 +130,131 @@ pub enum GitHubError {
     #[error("GitHub CLI command failed")]
     Command(#[from] CommandError),
 }
+
+#[cfg(test)]
+mod tests {
+    //! Tests for `gh` PR parsing, failure propagation, and the mock client.
+    use super::*;
+    use crate::command::{CommandError, CommandOutput, CommandRunner};
+    use rstest::rstest;
+    use std::cell::RefCell;
+
+    /// Records the spec it was given and returns a canned result.
+    struct StubRunner {
+        result: Result<String, CommandError>,
+        seen: RefCell<Option<CommandSpec>>,
+    }
+
+    impl StubRunner {
+        fn ok(stdout: &str) -> Self {
+            Self {
+                result: Ok(stdout.to_owned()),
+                seen: RefCell::new(None),
+            }
+        }
+
+        fn failing() -> Self {
+            Self {
+                result: Err(CommandError::NonZero {
+                    status: Some(1),
+                    stderr: "no pull requests found".to_owned(),
+                }),
+                seen: RefCell::new(None),
+            }
+        }
+    }
+
+    impl CommandRunner for StubRunner {
+        fn run(&self, spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
+            *self.seen.borrow_mut() = Some(spec.clone());
+            match &self.result {
+                Ok(stdout) => Ok(CommandOutput {
+                    stdout: stdout.clone(),
+                }),
+                Err(CommandError::NonZero { status, stderr }) => Err(CommandError::NonZero {
+                    status: *status,
+                    stderr: stderr.clone(),
+                }),
+                Err(_) => Err(CommandError::Timeout {
+                    timeout: GH_TIMEOUT,
+                }),
+            }
+        }
+    }
+
+    #[rstest]
+    #[case::plain("42", "42")]
+    #[case::trailing_newline("42\n", "42")]
+    #[case::surrounding_space("  7  ", "7")]
+    fn pr_number_parses_gh_output(#[case] stdout: &str, #[case] expected: &str) {
+        let runner = StubRunner::ok(stdout);
+        let client = GhCliClient::new(&runner);
+        let pr = client
+            .pr_number(Utf8Path::new("/projects/demo"), "main")
+            .expect("lookup succeeds");
+        assert_eq!(pr.map(|value| value.to_string()).as_deref(), Some(expected));
+    }
+
+    #[rstest]
+    #[case::empty("")]
+    #[case::whitespace_only("   \n")]
+    fn pr_number_reports_no_pr_for_empty_output(#[case] stdout: &str) {
+        let runner = StubRunner::ok(stdout);
+        let client = GhCliClient::new(&runner);
+        let pr = client
+            .pr_number(Utf8Path::new("/projects/demo"), "main")
+            .expect("lookup succeeds");
+        assert!(pr.is_none(), "empty gh output means no open PR");
+    }
+
+    #[rstest]
+    fn pr_number_propagates_command_failure() {
+        let runner = StubRunner::failing();
+        let client = GhCliClient::new(&runner);
+        let err = client
+            .pr_number(Utf8Path::new("/projects/demo"), "main")
+            .expect_err("command failure must propagate");
+        let GitHubError::Command(CommandError::NonZero { status, stderr }) = err else {
+            panic!("expected a propagated non-zero command error");
+        };
+        assert_eq!(status, Some(1));
+        assert_eq!(stderr, "no pull requests found");
+    }
+
+    #[rstest]
+    fn pr_number_builds_the_expected_command_spec() {
+        let runner = StubRunner::ok("1");
+        let client = GhCliClient::new(&runner);
+        let project_dir = Utf8Path::new("/projects/demo");
+        let _ = client.pr_number(project_dir, "main").expect("lookup");
+
+        let seen = runner.seen.borrow();
+        let spec = seen.as_ref().expect("the runner was invoked");
+        // The working directory scopes `gh` to the right repository, and the
+        // timeout keeps a stalled network call off the status path.
+        let expected = CommandSpec::new("gh")
+            .args(["pr", "view", "--json", "number", "--jq", ".number"])
+            .cwd(project_dir.to_path_buf())
+            .timeout(GH_TIMEOUT);
+        assert_eq!(*spec, expected);
+    }
+
+    #[rstest]
+    #[case::number("42", Some("42"))]
+    #[case::padded_number("  42  ", Some("42"))]
+    #[case::empty("", None)]
+    #[case::whitespace("   ", None)]
+    #[case::none_lowercase("none", None)]
+    #[case::none_uppercase("NONE", None)]
+    #[case::none_mixed("NoNe", None)]
+    fn mock_client_maps_its_configured_value(
+        #[case] configured: &str,
+        #[case] expected: Option<&str>,
+    ) {
+        let client = MockGitHubClient::new(configured);
+        let pr = client
+            .pr_number(Utf8Path::new("/projects/demo"), "main")
+            .expect("the mock never fails");
+        assert_eq!(pr.map(|value| value.to_string()).as_deref(), expected);
+    }
+}
