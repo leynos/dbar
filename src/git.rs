@@ -157,6 +157,12 @@ fn git_worktree_status(runner: &dyn CommandRunner, project_dir: &Utf8Path) -> (b
         if matches!(index, 'M' | 'A' | 'D' | 'R' | 'C') {
             staged = true;
         }
+        if dirty && staged {
+            // Both flags are latched, so the remaining lines cannot change the
+            // answer. The runner has already buffered the output; bounding that
+            // is `CommandSpec`'s output limit, not this loop's job.
+            break;
+        }
     }
 
     (dirty, staged)
@@ -256,10 +262,8 @@ mod tests {
                 "true",
             )
             .with_output(
-                CommandSpec::new("git")
-                    .args(["branch", "--show-current"])
-                    .cwd(Utf8PathBuf::from("/tmp/repo")),
-                "main",
+                git_command(Utf8Path::new("/tmp/repo"), ["branch", "--show-current"]),
+                "main\n",
             )
             .with_output(
                 CommandSpec::new("git")
@@ -274,9 +278,38 @@ mod tests {
                 "1\t2",
             );
         let status = git_status(&runner, Utf8Path::new("/tmp/repo")).expect("status");
+        // The trailing newline from `git` must be trimmed off the branch name.
+        assert_eq!(status.branch.as_ref(), "main");
         assert!(status.dirty);
         assert!(status.staged);
         assert_eq!(status.ahead.value(), 2);
         assert_eq!(status.behind.value(), 1);
+    }
+
+    #[rstest]
+    #[case::empty("")]
+    #[case::whitespace_only("  \n")]
+    fn git_status_reports_detached_when_no_branch_is_current(#[case] branch_output: &str) {
+        let project_dir = Utf8Path::new("/tmp/repo");
+        let runner = StubRunner::default()
+            .with_output(
+                git_command(project_dir, ["rev-parse", "--is-inside-work-tree"]),
+                "true",
+            )
+            .with_output(
+                git_command(project_dir, ["branch", "--show-current"]),
+                branch_output,
+            )
+            .with_output(git_command(project_dir, ["status", "--porcelain"]), "")
+            .with_output(
+                git_command(
+                    project_dir,
+                    ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+                ),
+                "0\t0",
+            );
+        let status = git_status(&runner, project_dir).expect("status");
+        // A detached HEAD reports no current branch, so the label falls back.
+        assert_eq!(status.branch.as_ref(), "detached");
     }
 }

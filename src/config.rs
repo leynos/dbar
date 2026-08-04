@@ -30,6 +30,11 @@ pub enum Commands {
 
 #[derive(Debug, Clone, Deserialize, Serialize, OrthoConfig, Default, Parser)]
 #[ortho_config(prefix = "DBAR")]
+// `ortho_config` derives the configuration namespace from the clap command
+// name. Without an explicit name each derived `Parser` reports the package
+// name, so both subcommands would share `[cmds.dbar]` and the documented
+// `[cmds.status]` section and `DBAR_CMDS_STATUS_*` variables would be ignored.
+#[command(name = "status")]
 /// Arguments for rendering a status line.
 pub struct StatusArgs {
     /// Override the project directory used for git probing.
@@ -74,6 +79,7 @@ pub struct StatusArgs {
 
 #[derive(Debug, Clone, Deserialize, Serialize, OrthoConfig, Default, Parser)]
 #[ortho_config(prefix = "DBAR")]
+#[command(name = "install")]
 /// Arguments for installing tmux configuration.
 pub struct InstallArgs {
     /// Path to the tmux configuration file to edit.
@@ -288,6 +294,28 @@ mod tests {
         };
         assert_eq!(args.position, Some(StatusPosition::Right));
         assert!(args.full);
+    }
+
+    #[rstest]
+    fn environment_values_apply_when_the_command_line_is_silent() {
+        let _lock = env_lock();
+        let _env = EnvGuard::set(&ISOLATING);
+        let _vars = EnvGuard::set(&[("DBAR_CMDS_STATUS_SESSION", "from-env")]);
+
+        let args = status_of(load_command_from(["dbar", "status"]).expect("status parses"));
+        assert_eq!(args.session.as_deref(), Some("from-env"));
+    }
+
+    #[rstest]
+    fn the_command_line_overrides_the_environment() {
+        let _lock = env_lock();
+        let _env = EnvGuard::set(&ISOLATING);
+        let _vars = EnvGuard::set(&[("DBAR_CMDS_STATUS_SESSION", "from-env")]);
+
+        let args = status_of(
+            load_command_from(["dbar", "status", "--session", "from-cli"]).expect("status parses"),
+        );
+        assert_eq!(args.session.as_deref(), Some("from-cli"));
     }
 
     #[rstest]
