@@ -191,7 +191,9 @@ ______________________________________________________________________
 Powerline’s look comes from two ideas:
 
 1. **Segments** with a background colour
-2. **A separator glyph** whose foreground matches the next segment’s background
+2. **A separator glyph** whose foreground matches the preceding segment’s
+   background, and whose background matches the following segment’s
+   background
 
 A typical separator glyph is `` (requires a nerd-font/powerline-capable font).
 

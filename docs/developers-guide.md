@@ -45,8 +45,10 @@ from `run()` based on the parsed `DbarCommand`.
   passing bare `String`/integer values between modules.
 - `install/mod.rs` — `install()` inserts or updates a marker-delimited tmux
   snippet in a configuration file, using `cap_std`/`camino` for path-capable,
-  UTF-8-only filesystem access, and backs up the previous contents before an
-  in-place update.
+  UTF-8-only filesystem access, and backs up the previous contents before
+  replacing the target atomically: the new contents are written to a
+  uniquely named temporary file, which inherits the target's permissions,
+  then renamed over the target.
 - `error.rs` — `DbarError`, the top-level error enum returned by `run()`,
   wrapping `CacheError`, `OrthoError`, `InstallError`, and `std::io::Error`.
 

@@ -313,7 +313,7 @@ to temp directories created per test and cleaned automatically by `tempfile`.
 
 Expected tmux usage snippet (final doc should include something like this):
 
-    set -g status-right '#(dbar status #{q:session_name} #{q:window_index} #{q:pane_id})'
+    set -g status-right '#(dbar status --session #{q:session_name} --window #{q:window_index} --pane #{q:pane_id})'
 
 Example status output (illustrative; exact values depend on repo state):
 

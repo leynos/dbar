@@ -79,10 +79,11 @@ The tmux status line protocol and style tags are explained in
 ## Configuration
 
 Configuration uses `ortho_config`, so values can be supplied via configuration
-files, environment variables, or CLI flags. The prefix is `DBAR`, and
-subcommand settings live under `cmds.status` or `cmds.install` in the config
-file. Environment variables use the `DBAR_CMDS_STATUS_` or `DBAR_CMDS_INSTALL_`
-prefixes.
+files, environment variables, or CLI flags. `.dbar.toml` defaults are
+overridden by `DBAR_*` environment variables, which are in turn overridden by
+CLI flags. The prefix is `DBAR`, and subcommand settings live under
+`cmds.status` or `cmds.install` in the config file. Environment variables use
+the `DBAR_CMDS_STATUS_` or `DBAR_CMDS_INSTALL_` prefixes.
 
 Example `.dbar.toml`:
 

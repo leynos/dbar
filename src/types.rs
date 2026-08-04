@@ -233,6 +233,9 @@ impl FromStr for CacheTtlSeconds {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+// Serde uses the same lowercase spellings as `Display` and `FromStr`, so a
+// configuration file and a command-line flag accept identical values.
+#[serde(rename_all = "lowercase")]
 /// tmux status line placement for the install snippet.
 pub enum StatusPosition {
     /// Apply the snippet to `status-left`.
@@ -343,6 +346,27 @@ mod tests {
             expected.parse::<StatusPosition>().expect("reparse"),
             position
         );
+    }
+
+    #[rstest]
+    #[case(StatusPosition::Left, "\"left\"")]
+    #[case(StatusPosition::Right, "\"right\"")]
+    fn status_position_serializes_in_lowercase(
+        #[case] position: StatusPosition,
+        #[case] expected_json: &str,
+    ) {
+        // Serde must accept the same spellings as the CLI flag and `Display`,
+        // so a configuration file and a command line agree.
+        let json = serde_json::to_string(&position).expect("serialize");
+        assert_eq!(json, expected_json);
+        let parsed: StatusPosition = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed, position);
+        assert_eq!(json.trim_matches('"'), position.to_string());
+    }
+
+    #[rstest]
+    fn status_position_rejects_capitalized_serde_values() {
+        assert!(serde_json::from_str::<StatusPosition>("\"Left\"").is_err());
     }
 
     #[rstest]

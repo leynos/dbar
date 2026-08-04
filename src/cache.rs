@@ -30,7 +30,7 @@ pub enum CacheError {
     /// The system clock returned a value before the Unix epoch.
     #[error("cache entry is older than the Unix epoch")]
     ClockSkew,
-    /// Serialisation or deserialisation failed.
+    /// Serialization or deserialization failed.
     #[error("cache serialization failed: {0}")]
     Serde(#[from] serde_json::Error),
     /// File system operations failed.

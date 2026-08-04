@@ -93,10 +93,11 @@ directly from domain code, following the pattern already established by
 6. Existing behaviour is unchanged: `cargo test` passes with no
    modification to observable CLI output, `install` snippet contents, or
    cache file format.
-7. Each new port (working directory, cache storage, render) is expressed as
-   a trait with a single production implementation, mirroring
-   `command::CommandRunner` and `github::GitHubClient`, so tests can supply
-   a stub without an integration harness.
+7. A port (working directory, cache storage, render) is expressed as a
+   trait, mirroring `command::CommandRunner` and `github::GitHubClient`,
+   only where doing so isolates a real dependency or enables a test
+   specified in this issue; a stub then substitutes for the production
+   implementation without an integration harness.
 
 ### Out of scope
 
