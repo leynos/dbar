@@ -12,7 +12,15 @@ accepted = ["Center"]
 [words.corrections]
 
 [patterns]
-ignore = []
+ignore = [
+  # "mold" names the linker (https://github.com/rui314/mold) in these
+  # contexts only; the mould correction stays active elsewhere.
+  "-fuse-ld=mold",
+  "mold linker",
+  "Cranelift \\+ mold",
+  "Cranelift and mold",
+  "`mold`",
+]
 
 [files]
 exclude = []
