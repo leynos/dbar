@@ -12,32 +12,56 @@ layers and lint constraints that shape test code.
 entry points invoked from `main`: `run_status` and `run_install`, dispatched
 from `run()` based on the parsed `DbarCommand`.
 
-- `config.rs` — CLI parsing (`clap`) and configuration merging
+- `config/mod.rs` — CLI parsing (`clap`) and configuration merging
   (`ortho_config`). `Cli`/`Commands` define the `status` and `install`
   subcommands; `StatusArgs` and `InstallArgs` are `OrthoConfig` structs
   merged from CLI flags, environment variables (`DBAR_` prefix), and
-  configuration files. `load_command()` returns a `DbarCommand`.
-- `command.rs` — the `CommandRunner` trait and `CommandSpec` builder used to
-  shell out to `git`, `gh`, and `tmux`. See "Dependency-injection seams"
+  configuration files. `load_command()` returns a `DbarCommand`. Test
+  fixtures live under `config/tests/`.
+- `command/mod.rs` — the `CommandRunner` trait and `CommandSpec` builder used
+  to shell out to `git`, `gh`, and `tmux`. See "Dependency-injection seams"
   below.
-- `git.rs` — free functions `project_name` and `git_status` that run `git`
-  probes through a `&dyn CommandRunner` and parse the results into
-  `ProjectName` and `GitStatus`.
+- `git/mod.rs` — free functions `project_name` and `git_status` that run
+  `git` probes (in `git/probes.rs`) through a `&dyn CommandRunner`.
+  `project_name` returns a `ProjectName` directly, since it is a chain of
+  heuristics with no failure to report. `git_status` returns a
+  `GitStatusOutcome` — `Available(GitStatusReport)`, `NotARepository`, or
+  `Unavailable(GitProbeFailure)` — so a caller can tell a missing repository
+  apart from a failed or unparseable probe; `GitStatusReport` carries the
+  `GitStatus` snapshot alongside any field-level `GitProbeFailure`s the
+  fallback policy absorbed. See the module's fallback-policy table for what
+  each outcome renders.
 - `github.rs` — the `GitHubClient` trait and its two implementations,
   `GhCliClient` (backed by the `gh` CLI via `CommandRunner`) and
   `MockGitHubClient` (a fixed value, wired up when `--github-mock-pr` is
   supplied).
-- `tmux.rs` — `TmuxContext` and `resolve_context`, which fills in missing
+- `tmux/mod.rs` — `TmuxContext` and `resolve_context`, which fills in missing
   session/window/pane/socket fields by querying `tmux display-message`
-  through a `&dyn CommandRunner`.
+  through a `&dyn CommandRunner`. `resolve_context` returns a
+  `TmuxResolution { context, outcome }` rather than a bare `TmuxContext`, so a
+  caller can tell a pre-resolved context apart from one queried cleanly, one
+  with malformed fields, or one where tmux was unavailable. See the module's
+  fallback-policy table for what each outcome renders.
 - `cache/mod.rs` — resolves the XDG cache directory (via `directories`) and
   performs TTL-checked reads and atomic temp-file-then-rename writes of
   cached PR lookups, plus the bounded retention sweep described under "Cache
   retention" below.
-- `status.rs` — `build_status_line` orchestrates a single status line: it
-  resolves the project directory, probes git, looks up (and caches) the PR
-  number, resolves tmux context, renders the clock label, and passes
-  everything to `render::render_status_line`.
+- `status/mod.rs` — `build_status_report` orchestrates a single status line:
+  it resolves the project directory, probes git, looks up the PR number,
+  resolves tmux context, renders the clock label, and passes everything to
+  `render::render_status_line`. It returns a `StatusReport { line,
+  diagnostics }`, where `diagnostics` is a `StatusDiagnostics` collecting
+  every typed probe failure the fallback policy absorbed. This module is
+  also the sole boundary that reads and writes the PR cache; the pure
+  lookup policy lives in `status/pr/mod.rs` (see below), and
+  `status/clock.rs` and `status/cache_key.rs` hold the clock-rendering and
+  cache-key-hashing helpers respectively.
+- `status/pr/mod.rs` — pure PR lookup policy: `decide` turns a completed
+  GitHub lookup (plus the cache outcome the caller already read) into a
+  `PrDecision` naming the PR number to render and a `PersistRequest`, without
+  performing any I/O itself. `status/mod.rs` carries out the cache read
+  before calling it and the cache write it requests afterwards, which keeps
+  every policy branch testable without a filesystem.
 - `render/mod.rs` — pure rendering: `RenderContext` plus `render_status_line`
   assemble the tmux `#[...]` style tags and Powerline-style glyphs into the
   final string, with optional right-alignment to a client width.
@@ -51,27 +75,37 @@ from `run()` based on the parsed `DbarCommand`.
   uniquely named temporary file, which inherits the target's permissions,
   then renamed over the target.
 - `error.rs` — `DbarError`, the top-level error enum returned by `run()`,
-  wrapping `CacheError`, `OrthoError`, `InstallError`, and `std::io::Error`.
+  wrapping `CacheError`, `config::ConfigError` (itself wrapping
+  `ortho_config::OrthoError`), `InstallError`, and `std::io::Error`.
 
 ### End-to-end assembly of a status line
 
 1. `run_status` in `src/lib.rs` constructs a `RealCommandRunner`, a
    `DefaultClock` (from `mockable`), and either a `GhCliClient` or a
    `MockGitHubClient` depending on whether `--github-mock-pr` was passed.
-2. `status::build_status_line` resolves the project directory (from
+2. `status::build_status_report` resolves the project directory (from
    `--project-dir` or the current working directory), then calls
    `git::project_name` and `git::git_status`.
-3. If PR lookup is enabled and a git branch was found, `pr_number` first
-   checks the on-disk cache (via `cache::load_cached_value`), then falls back
-   to `GitHubClient::pr_number`, then to a `pr/<n>`-style branch-name
-   heuristic. A successful non-empty result is written back through
-   `cache::store_cached_value`; a failed lookup is never cached, so a
-   transient network error does not poison the PR value for the whole TTL.
+3. If PR lookup is enabled and a git branch was found, the private
+   `resolve_pr_number` helper in `status/mod.rs` first checks the on-disk
+   cache (via
+   `cache::load_cached_value`), then falls back to `GitHubClient::pr_number`,
+   then to a `pr/<n>`-style branch-name heuristic. The pure decision — which
+   PR number to render and whether to persist it — is made by
+   `status::pr::decide`; `resolve_pr_number` carries out the resulting cache
+   write through `cache::store_cached_value`. A failed lookup is never
+   cached, so a transient network error does not poison the PR value for the
+   whole TTL.
 4. `tmux::resolve_context` fills in any tmux fields not already supplied on
    the command line by querying `tmux display-message`.
 5. `render::render_status_line` combines the project, git, PR, tmux, and
    clock segments into the final tmux-ready string, which `run_status` prints
-   to stdout.
+   to stdout, together with a `StatusDiagnostics` describing every probe
+   failure the fallback policy absorbed along the way.
+6. If the `DBAR_DIAGNOSTICS` environment variable is set, `run_status` mirrors
+   those diagnostics to stderr, one failure per line; stdout is unaffected
+   either way, so the tmux status line contract is unchanged. See
+   `report_diagnostics` in `src/lib.rs`.
 
 ### Cache retention
 
@@ -123,20 +157,21 @@ carries time:
   wraps a `&dyn CommandRunner` to shell out to `gh`; `MockGitHubClient`
   returns a fixed, pre-configured PR number and is the concrete type wired
   up for `--github-mock-pr`, but any test can implement the trait directly
-  for finer control (see `FailingGitHubClient` in `src/status.rs`).
+  for finer control (see `StubGitHubClient` in `src/status/tests.rs`, whose
+  `Reply::Failure` variant stands in for a network or rate-limit error).
 
 Both traits exist so unit and behavioural tests stay hermetic: no test needs
 network access, a real `git`/`gh`/`tmux` binary, or environment-variable
-mutation to exercise the orchestration logic in `git.rs`, `tmux.rs`, and
-`status.rs`.
+mutation to exercise the orchestration logic in `git/mod.rs`, `tmux/mod.rs`,
+and `status/mod.rs`.
 
-`src/git.rs` and `src/tmux.rs` each define a private `StubRunner` in their
-`#[cfg(test)] mod tests` block as a worked example of a `CommandRunner`
-double: `git.rs`'s stub maps exact `CommandSpec` values to canned stdout via
-a `HashMap`, while `tmux.rs`'s stub returns one canned response (or an
-error) and counts how many times it was called, to prove short-circuiting.
-New tests needing a `CommandRunner` double should follow one of these two
-patterns rather than introducing a new abstraction.
+`src/git/tests.rs` and `src/tmux/tests.rs` each define a private `StubRunner`
+as a worked example of a `CommandRunner` double: `git/tests.rs`'s stub maps
+exact `CommandSpec` values to canned stdout via a `HashMap`, while
+`tmux/tests.rs`'s stub returns one canned response (or an error) and counts
+how many times it was called, to prove short-circuiting. New tests needing a
+`CommandRunner` double should follow one of these two patterns rather than
+introducing a new abstraction.
 
 ## Tooling and gates
 
@@ -170,13 +205,19 @@ the next generation run.
 
 Tests are organized in three layers:
 
-1. Unit tests — `#[cfg(test)] mod tests` blocks colocated with the module
-   under test (for example `src/command.rs`, `src/cache/mod.rs` and
-   `src/cache/tests.rs`, `src/git.rs`,
-   `src/tmux.rs`, `src/render/mod.rs`, `src/status.rs`,
-   `src/install/mod.rs`/`src/install/tests.rs`). Cases use `#[rstest]`, with
-   `#[case]` parameterization for table-style coverage and `#[fixture]` for
-   shared setup such as temporary directories.
+1. Unit tests — `#[cfg(test)] mod tests` declarations colocated with the
+   module under test, backed by a sibling `tests.rs` (or, for `config/`, a
+   `tests/` directory): `src/command/mod.rs`/`src/command/tests.rs`,
+   `src/cache/mod.rs`/`src/cache/tests.rs`,
+   `src/git/mod.rs`/`src/git/tests.rs`, `src/tmux/mod.rs`/`src/tmux/tests.rs`,
+   `src/render/mod.rs`/`src/render/tests.rs`,
+   `src/status/mod.rs`/`src/status/tests.rs`,
+   `src/status/pr/mod.rs`/`src/status/pr/tests.rs`,
+   `src/install/mod.rs`/`src/install/tests.rs`, and
+   `src/config/mod.rs`/`src/config/tests/` (split into `mod.rs`,
+   `arguments.rs`, and `files.rs`). Cases use `#[rstest]`, with `#[case]`
+   parameterization for table-style coverage and `#[fixture]` for shared
+   setup such as temporary directories.
 2. Behavioural tests — `rstest-bdd` scenarios under `tests/rstest_bdd/`,
    driven by a `.feature` file (`status.feature`) and step implementations
    in `status_steps.rs`, loaded from the `tests/rstest_bdd_tests.rs` crate
@@ -230,8 +271,8 @@ denied) and are used sparingly in this crate, for example around the two
 `print_stdout` call sites in `src/lib.rs` where CLI output is the intended
 behaviour; and helper functions should stay small and single-purpose to
 avoid tripping the cognitive-complexity and argument-count ceilings — group
-related parameters into a struct (see `PrLookup` in `src/status.rs`) rather
-than adding another positional parameter.
+related parameters into a struct (see `PrLookup` in `src/status/mod.rs`)
+rather than adding another positional parameter.
 
 Dependencies are pinned with caret requirements. Notable runtime crates:
 `camino`/`cap-std` (UTF-8, capability-oriented filesystem access in place of
@@ -244,7 +285,7 @@ resolution), `ortho_config` (layered CLI/env/config parsing), and
 
 ### Real command execution
 
-`RealCommandRunner::run` (in `command.rs`) spawns the child in its own
+`RealCommandRunner::run` (in `command/mod.rs`) spawns the child in its own
 process group on Unix (`rustix::process::kill_process_group`), and drains
 stdout and stderr concurrently on dedicated reader threads while
 `wait_timeout` waits for the child. This combination avoids two failure

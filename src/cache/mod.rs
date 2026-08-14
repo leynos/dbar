@@ -69,10 +69,10 @@ const SWEEP_INSPECT_LIMIT: usize = 16;
 /// Entries removed in one retention sweep.
 const SWEEP_REMOVAL_LIMIT: usize = 8;
 
-/// The prefix `status.rs` gives every PR cache file name.
+/// The prefix `status::cache_key` gives every PR cache file name.
 const OWNED_NAME_PREFIX: &str = "pr_";
 
-/// The extension `status.rs` gives every PR cache file name.
+/// The extension `status::cache_key` gives every PR cache file name.
 const OWNED_NAME_SUFFIX: &str = ".json";
 
 /// The number of hex digits in a PR cache file name (`{digest:016x}`).
@@ -284,7 +284,7 @@ fn is_owned_entry(entry: &DirEntry) -> bool {
     is_file && entry.file_name().is_ok_and(|name| is_owned_name(&name))
 }
 
-/// Report whether `name` matches `status.rs`'s `pr_{digest:016x}.json` shape.
+/// Report whether `name` matches `status::cache_key`'s `pr_{digest:016x}.json` shape.
 fn is_owned_name(name: &str) -> bool {
     name.strip_prefix(OWNED_NAME_PREFIX)
         .and_then(|rest| rest.strip_suffix(OWNED_NAME_SUFFIX))

@@ -1,68 +1,8 @@
-//! Tests for argument parsing and configuration precedence.
+//! Coverage for command-line parsing and environment merging.
 //!
-//! `ortho_config` reads `DBAR_*` variables and configuration files from the
-//! ambient environment, so environment-dependent cases serialize on a shared
-//! lock and restore every variable they touch. Argument-only cases still take
-//! the lock, because a stray `DBAR_*` value would otherwise perturb them.
+//! These cases never write a configuration file; discovery is suppressed by the
+//! harness so only the argument and environment layers are in play.
 use super::*;
-use rstest::rstest;
-use std::ffi::OsString;
-use std::sync::{Mutex, MutexGuard, OnceLock};
-
-/// Serializes every test that touches process-wide environment state.
-fn env_lock() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// Restores the variables it captured when dropped.
-struct EnvGuard {
-    saved: Vec<(String, Option<OsString>)>,
-}
-
-impl EnvGuard {
-    fn set(pairs: &[(&str, &str)]) -> Self {
-        let saved = pairs
-            .iter()
-            .map(|(key, _)| ((*key).to_owned(), std::env::var_os(key)))
-            .collect();
-        for (key, value) in pairs {
-            // SAFETY: `env_lock` serializes every mutation in this module and
-            // the guard restores the previous value on drop.
-            unsafe { std::env::set_var(key, value) };
-        }
-        Self { saved }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        for (key, value) in &self.saved {
-            // SAFETY: as above; the lock is still held by the test.
-            match value {
-                Some(previous) => unsafe { std::env::set_var(key, previous) },
-                None => unsafe { std::env::remove_var(key) },
-            }
-        }
-    }
-}
-
-/// Variables that would otherwise leak real user configuration into a test.
-const ISOLATING: [(&str, &str); 4] = [
-    ("DBAR_CONFIG_PATH", ""),
-    ("DBAR_SESSION", ""),
-    ("XDG_CONFIG_HOME", "/nonexistent-dbar-test"),
-    ("XDG_CONFIG_DIRS", ""),
-];
-
-fn status_of(command: DbarCommand) -> StatusArgs {
-    match command {
-        DbarCommand::Status(args) => args,
-        DbarCommand::Install(_) => panic!("expected the status subcommand"),
-    }
-}
 
 #[rstest]
 fn documented_defaults_apply_when_nothing_overrides_them() {
@@ -147,8 +87,8 @@ fn invalid_arguments_are_reported_rather_than_exiting(#[case] argv: &[&str]) {
     let _lock = env_lock();
     let _env = EnvGuard::set(&ISOLATING);
 
-    let err = load_command_from(argv.iter().copied())
-        .expect_err("invalid arguments must be rejected");
+    let err =
+        load_command_from(argv.iter().copied()).expect_err("invalid arguments must be rejected");
     assert!(
         matches!(err, ConfigError::Cli(_)),
         "expected a CLI error, got {err:?}"

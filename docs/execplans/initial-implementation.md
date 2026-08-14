@@ -322,45 +322,52 @@ Example status output (illustrative; exact values depend on repo state):
 ## Interfaces and dependencies
 
 The plan is COMPLETE; the interfaces below reflect what was delivered, not
-the speculative names drafted before implementation began.
+the speculative names drafted before implementation began. Every `mod`
+declaration in `src/lib.rs` is private, so none of the module paths below
+are reachable from outside the crate; they describe the internal seams
+used to assemble `dbar::run()`. The only public surface is `dbar::run()`
+and the re-exported `dbar::DbarError`.
 
-Delivered core interfaces:
+Delivered internal interfaces:
 
-- `dbar::config::StatusArgs` / `dbar::config::InstallArgs`:
+- `config::StatusArgs` / `config::InstallArgs`:
   `#[derive(OrthoConfig)]` structs parsed by `clap` and merged from CLI/env
   by `ortho_config`, covering `project_dir`, `client_width`, `session`,
   `window`, `pane`, `socket`, `show_pr`, `show_clock`, `clock_format`,
   `github_mock_pr`, `pr_cache_ttl_seconds`, and `cache_dir` (status), and
   `path`, `dry_run`, `full`, and `position` (install).
-  `dbar::config::load_command() -> Result<DbarCommand, Arc<OrthoError>>`
-  parses and merges the selected subcommand.
-- `dbar::status::build_status_line(args: &StatusArgs, runner: &dyn
+  `config::load_command() -> Result<DbarCommand, ConfigError>`
+  parses and merges the selected subcommand, where `ConfigError` has two
+  variants: `Cli(Box<clap::Error>)` for invalid command-line arguments and
+  `Merge(Arc<ortho_config::OrthoError>)` for environment/config-file
+  merge failures.
+- `status::build_status_line(args: &StatusArgs, runner: &dyn
   CommandRunner, clock: &dyn Clock, github: &dyn GitHubClient) ->
   Result<String, DbarError>`: assembles and returns the rendered status
   line; there is no separate `StatusContext`/`StatusLine` type.
-- `dbar::command::CommandRunner`: trait executing a `CommandSpec` and
+- `command::CommandRunner`: trait executing a `CommandSpec` and
   returning a `CommandOutput`, implemented by `RealCommandRunner`. This
   seam was not anticipated in the original plan; `git`, `tmux`, and GitHub
   probing all depend on it for hermetic testing.
-- `dbar::git::project_name` / `dbar::git::git_status`: free functions that
+- `git::project_name` / `git::git_status`: free functions that
   read branch, dirty/staged state, upstream counts, and worktree detection
   through a `&dyn CommandRunner`; there is no `GitProbe` trait.
-- `dbar::tmux::resolve_context(runner: &dyn CommandRunner, context:
+- `tmux::resolve_context(runner: &dyn CommandRunner, context:
   TmuxContext) -> TmuxContext`: free function that fills in missing
   session/window/pane/socket fields from `tmux display-message` output;
   there is no `TmuxProbe` trait.
-- `dbar::render::render_status_line(context: &RenderContext) -> String`:
+- `render::render_status_line(context: &RenderContext) -> String`:
   renderer that applies the `claude-status` palette and glyphs and emits
   tmux `#[fg=colourNN]`/`#[bg=colourNN]` styling.
-- `dbar::install::install(path: Option<Utf8PathBuf>, position:
+- `install::install(path: Option<Utf8PathBuf>, position:
   StatusPosition, dry_run: bool, full: bool) -> Result<InstallOutcome,
   InstallError>`: free function that writes a marker-delimited tmux
   snippet and returns a summary of changes; there is no `TmuxInstaller`
   type.
-- `dbar::cache::{resolve_cache_dir, load_cached_value,
+- `cache::{resolve_cache_dir, load_cached_value,
   store_cached_value}`: helpers that resolve the XDG cache path and manage
   cached lookup files, as planned.
-- `dbar::github::GitHubClient`: trait for PR lookup, implemented by
+- `github::GitHubClient`: trait for PR lookup, implemented by
   `GhCliClient` (backed by the `gh` CLI via `CommandRunner`) and
   `MockGitHubClient` (a fixed value, wired up via `--github-mock-pr`).
   Like `CommandRunner`, this seam was not anticipated in the original
@@ -400,3 +407,10 @@ delivered `CommandRunner`/`GitHubClient` interfaces, free-function probing
 API, and full runtime dependency list, replacing speculative interface
 names (`DbarConfig`, `StatusContext`/`StatusLine`, `GitProbe`, `TmuxProbe`,
 `TmuxInstaller`) that were never implemented.
+
+Revised 2026-08-14 to correct `config::load_command`'s error type from
+`Arc<OrthoError>` to `ConfigError` (with its `Cli`/`Merge` variants), and to
+drop the `dbar::` module-path prefix from "Interfaces and dependencies"
+since every module in `src/lib.rs` is declared with a private `mod`; the
+only public crate surface is `dbar::run()` and the re-exported
+`dbar::DbarError`.
