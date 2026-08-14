@@ -62,18 +62,34 @@ pub fn resolve_context(runner: &dyn CommandRunner, mut context: TmuxContext) -> 
     context
 }
 
+/// Build the `display-message` specification for a single tmux format.
+fn field_spec(format: &str) -> CommandSpec {
+    CommandSpec::new("tmux").args(["display-message", "-p", format])
+}
+
+/// Query one tmux format string, returning its trimmed value.
+///
+/// Each call's entire trimmed stdout *is* the field value, so no separator
+/// character has to be reserved and no byte content can misalign the result.
+fn query_field(runner: &dyn CommandRunner, format: &str) -> Option<String> {
+    let output = runner.run(&field_spec(format)).ok()?;
+    Some(output.stdout.trim().to_owned())
+}
+
+/// Query the four tmux fields, one `display-message` invocation apiece.
+///
+/// Packing the fields into a single delimited format string would be cheaper,
+/// but no delimiter is safe: tmux only forbids `:` and `.` in session names, so
+/// a session called `a|b` (or one containing any other candidate separator)
+/// would shift every subsequent field. The extra processes are affordable
+/// because this is a fallback path, not the per-refresh hot path:
+/// `resolve_context` short-circuits via `is_complete`, and the installed tmux
+/// snippet normally passes `--session/--window/--pane/--socket` explicitly.
 fn query_tmux(runner: &dyn CommandRunner) -> Option<(String, String, String, String)> {
-    let spec = CommandSpec::new("tmux").args([
-        "display-message",
-        "-p",
-        "#{session_name}|#{window_index}|#{pane_id}|#{socket_path}",
-    ]);
-    let output = runner.run(&spec).ok()?;
-    let mut parts = output.stdout.trim().splitn(4, '|');
-    let session = parts.next()?.to_owned();
-    let window = parts.next()?.to_owned();
-    let pane = parts.next()?.to_owned();
-    let socket = parts.next().unwrap_or_default().to_owned();
+    let session = query_field(runner, "#{session_name}")?;
+    let window = query_field(runner, "#{window_index}")?;
+    let pane = query_field(runner, "#{pane_id}")?;
+    let socket = query_field(runner, "#{socket_path}")?;
     Some((session, window, pane, socket))
 }
 
@@ -83,28 +99,43 @@ mod tests {
     use super::*;
     use crate::command::{CommandError, CommandOutput};
     use rstest::rstest;
+    use std::cell::Cell;
+    use std::collections::HashMap;
 
-    /// A runner that returns one canned stdout, or fails when none is set, and
-    /// counts how many times it was consulted.
+    /// A runner that maps each requested `display-message` specification to a
+    /// canned stdout, failing for unknown specifications, and counting how many
+    /// times it was consulted.
     #[derive(Default)]
     struct StubRunner {
-        stdout: Option<String>,
-        calls: std::cell::Cell<usize>,
+        outputs: HashMap<CommandSpec, String>,
+        calls: Cell<usize>,
     }
 
     impl StubRunner {
-        fn with_stdout(stdout: &str) -> Self {
+        /// Answer all four tmux fields with the given raw stdout values.
+        fn with_fields(session: &str, window: &str, pane: &str, socket: &str) -> Self {
+            let mut outputs = HashMap::new();
+            outputs.insert(field_spec("#{session_name}"), session.to_owned());
+            outputs.insert(field_spec("#{window_index}"), window.to_owned());
+            outputs.insert(field_spec("#{pane_id}"), pane.to_owned());
+            outputs.insert(field_spec("#{socket_path}"), socket.to_owned());
             Self {
-                stdout: Some(stdout.to_owned()),
+                outputs,
                 ..Self::default()
             }
+        }
+
+        /// Drop one field so its query fails, simulating a partial answer.
+        fn without_field(mut self, format: &str) -> Self {
+            self.outputs.remove(&field_spec(format));
+            self
         }
     }
 
     impl CommandRunner for StubRunner {
-        fn run(&self, _spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
+        fn run(&self, spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
             self.calls.set(self.calls.get() + 1);
-            self.stdout.as_ref().map_or(
+            self.outputs.get(spec).map_or(
                 Err(CommandError::NonZero {
                     status: Some(1),
                     stderr: String::new(),
@@ -142,7 +173,7 @@ mod tests {
 
     #[rstest]
     fn resolve_context_fills_missing_fields() {
-        let runner = StubRunner::with_stdout("sess|1|%0|/tmp/sock\n");
+        let runner = StubRunner::with_fields("sess", "1", "%0", "/tmp/sock\n");
         let resolved = resolve_context(&runner, TmuxContext::default());
         assert_eq!(resolved.session.as_deref(), Some("sess"));
         assert_eq!(resolved.window.as_deref(), Some("1"));
@@ -153,7 +184,7 @@ mod tests {
 
     #[rstest]
     fn resolve_context_preserves_prepopulated_fields() {
-        let runner = StubRunner::with_stdout("other|9|%9|/tmp/other");
+        let runner = StubRunner::with_fields("other", "9", "%9", "/tmp/other");
         let context = TmuxContext {
             session: Some("mine".to_owned()),
             ..TmuxContext::default()
@@ -165,7 +196,7 @@ mod tests {
 
     #[rstest]
     fn resolve_context_ignores_empty_response_fields() {
-        let runner = StubRunner::with_stdout("sess||%0|");
+        let runner = StubRunner::with_fields("sess", "", "%0", "");
         let resolved = resolve_context(&runner, TmuxContext::default());
         assert_eq!(resolved.session.as_deref(), Some("sess"));
         assert_eq!(resolved.window, None);
@@ -174,14 +205,36 @@ mod tests {
     }
 
     #[rstest]
-    #[case::short_output("sess|1")]
-    #[case::empty_output("")]
-    fn resolve_context_handles_malformed_output(#[case] stdout: &str) {
-        let runner = StubRunner::with_stdout(stdout);
+    #[case::partial_answer(StubRunner::with_fields("sess", "1", "%0", "/tmp/sock")
+        .without_field("#{pane_id}"))]
+    #[case::empty_answers(StubRunner::with_fields("", "", "", ""))]
+    fn resolve_context_handles_unusable_output(#[case] runner: StubRunner) {
         let resolved = resolve_context(&runner, TmuxContext::default());
-        // Malformed output must leave the context untouched, not panic.
+        // Unusable output must leave the context untouched, not panic.
         assert_eq!(resolved.session, None);
         assert_eq!(resolved.window, None);
+    }
+
+    #[rstest]
+    fn resolve_context_handles_session_name_containing_a_pipe() {
+        // tmux forbids only `:` and `.` in session names, so `|` is legal and
+        // must not be mistaken for a field separator.
+        let runner = StubRunner::with_fields("a|b", "3", "%2", "/tmp/sock");
+        let resolved = resolve_context(&runner, TmuxContext::default());
+        assert_eq!(resolved.session.as_deref(), Some("a|b"));
+        assert_eq!(resolved.window.as_deref(), Some("3"));
+        assert_eq!(resolved.pane.as_deref(), Some("%2"));
+        assert_eq!(resolved.socket.as_deref(), Some("/tmp/sock"));
+    }
+
+    #[rstest]
+    fn resolve_context_handles_socket_path_containing_a_pipe() {
+        let runner = StubRunner::with_fields("sess", "3", "%2", "/tmp/weird|socket");
+        let resolved = resolve_context(&runner, TmuxContext::default());
+        assert_eq!(resolved.session.as_deref(), Some("sess"));
+        assert_eq!(resolved.window.as_deref(), Some("3"));
+        assert_eq!(resolved.pane.as_deref(), Some("%2"));
+        assert_eq!(resolved.socket.as_deref(), Some("/tmp/weird|socket"));
     }
 
     #[rstest]
@@ -189,5 +242,8 @@ mod tests {
         let runner = StubRunner::default();
         let resolved = resolve_context(&runner, TmuxContext::default());
         assert_eq!(resolved.session, None);
+        // The runner must have been consulted, otherwise this test would pass
+        // even if `resolve_context` never queried tmux at all.
+        assert!(runner.calls.get() > 0);
     }
 }

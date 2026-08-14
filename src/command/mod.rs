@@ -16,6 +16,16 @@ use wait_timeout::ChildExt;
 /// line indefinitely.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Default ceiling on the bytes captured from each of the child's streams.
+///
+/// The realistic large producer is `git status --porcelain` in a very large
+/// repository, which emits one line per changed path and can therefore grow
+/// without any natural bound. Buffering that in full would let a single probe
+/// balloon the status line's memory for no benefit, because
+/// `git_worktree_status` only inspects the first two characters of each line.
+/// Four mebibytes is far beyond any status output worth summarizing.
+const DEFAULT_MAX_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A command specification used by probes.
 pub struct CommandSpec {
@@ -23,6 +33,7 @@ pub struct CommandSpec {
     args: Vec<String>,
     cwd: Option<Utf8PathBuf>,
     timeout: Option<Duration>,
+    max_output_bytes: Option<usize>,
 }
 
 impl CommandSpec {
@@ -41,6 +52,7 @@ impl CommandSpec {
             args: Vec::new(),
             cwd: None,
             timeout: None,
+            max_output_bytes: None,
         }
     }
 
@@ -87,6 +99,20 @@ impl CommandSpec {
         self.timeout = Some(timeout);
         self
     }
+
+    /// Override the per-stream output ceiling for this command.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use dbar::command::CommandSpec;
+    ///
+    /// let spec = CommandSpec::new("git").max_output_bytes(1024);
+    /// ```
+    pub const fn max_output_bytes(mut self, max_output_bytes: usize) -> Self {
+        self.max_output_bytes = Some(max_output_bytes);
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -116,6 +142,14 @@ pub enum CommandError {
         /// The elapsed ceiling that was exceeded.
         timeout: Duration,
     },
+    /// A stream exceeded its configured byte ceiling and was terminated.
+    #[error("{stream} exceeded the {limit}-byte output limit and was terminated")]
+    OutputTooLarge {
+        /// The configured byte ceiling that was exceeded.
+        limit: usize,
+        /// Which stream exceeded the ceiling.
+        stream: &'static str,
+    },
 }
 
 /// Executes external commands for probes.
@@ -144,22 +178,63 @@ fn take_pipe<T>(pipe: Option<T>) -> Result<T, CommandError> {
     pipe.ok_or_else(|| CommandError::Io(io::Error::other("child pipe unavailable")))
 }
 
+/// What a bounded reader thread observed on its stream.
+enum ReadOutcome {
+    /// The stream ended within its ceiling, yielding these bytes.
+    Bytes(Vec<u8>),
+    /// The stream exceeded its ceiling; the payload was discarded.
+    TooLarge,
+}
+
 /// Drain a child pipe on its own thread so the child never blocks on a full
 /// pipe buffer while the parent is waiting for it to exit.
-fn spawn_reader(mut pipe: impl Read + Send + 'static) -> JoinHandle<io::Result<Vec<u8>>> {
+///
+/// The read is bounded at `limit` bytes. One byte beyond the ceiling is read so
+/// that overrunning the limit is distinguishable from exactly reaching it; if
+/// that extra byte materializes the buffer is dropped and the child's process
+/// group is killed, because there is no point letting a runaway producer keep
+/// writing into a capture that has already been abandoned.
+fn spawn_reader(
+    mut pipe: impl Read + Send + 'static,
+    limit: usize,
+    pid: u32,
+) -> JoinHandle<io::Result<ReadOutcome>> {
     std::thread::spawn(move || {
+        let ceiling = u64::try_from(limit)
+            .map_err(|_| io::Error::other("output limit does not fit in a byte count"))?;
         let mut buffer = Vec::new();
-        pipe.read_to_end(&mut buffer)?;
-        Ok(buffer)
+        pipe.by_ref().take(ceiling + 1).read_to_end(&mut buffer)?;
+        if buffer.len() > limit {
+            // Release the oversized payload before doing anything else; it must
+            // not be retained or handed back to the caller.
+            drop(buffer);
+            // Best effort: the caller's cleanup paths are the backstop, so a
+            // failure here is not worth reporting over the size violation.
+            drop(signal_process_group(pid));
+            return Ok(ReadOutcome::TooLarge);
+        }
+        Ok(ReadOutcome::Bytes(buffer))
     })
 }
 
-/// Collect a reader thread's buffered bytes.
-fn join_reader(handle: JoinHandle<io::Result<Vec<u8>>>) -> Result<Vec<u8>, CommandError> {
-    let bytes = handle
+/// Collect a reader thread's outcome.
+fn join_reader(handle: JoinHandle<io::Result<ReadOutcome>>) -> Result<ReadOutcome, CommandError> {
+    let outcome = handle
         .join()
         .map_err(|_| io::Error::other("output reader thread panicked"))??;
-    Ok(bytes)
+    Ok(outcome)
+}
+
+/// Unwrap a reader outcome, reporting an overrun against the named stream.
+fn require_within_limit(
+    outcome: ReadOutcome,
+    limit: usize,
+    stream: &'static str,
+) -> Result<Vec<u8>, CommandError> {
+    match outcome {
+        ReadOutcome::Bytes(bytes) => Ok(bytes),
+        ReadOutcome::TooLarge => Err(CommandError::OutputTooLarge { limit, stream }),
+    }
 }
 
 /// Put the child in its own process group so its descendants can be signalled
@@ -178,9 +253,12 @@ fn use_own_process_group(_command: &mut Command) {}
 /// Signalling only the direct child would leave a backgrounded grandchild
 /// holding the inherited pipe write end open, so the reader threads would never
 /// observe EOF and the timeout would block instead of returning.
+///
+/// The pid is taken raw rather than as a `&Child` so that a reader thread,
+/// which does not own the child handle, can terminate the group too.
 #[cfg(unix)]
-fn signal_process_group(child: &Child) -> Result<(), CommandError> {
-    let raw = i32::try_from(child.id())
+fn signal_process_group(child_pid: u32) -> Result<(), CommandError> {
+    let raw = i32::try_from(child_pid)
         .map_err(|_| io::Error::other("child pid does not fit in a process id"))?;
     let pid = rustix::process::Pid::from_raw(raw)
         .ok_or_else(|| io::Error::other("child pid is not a valid process id"))?;
@@ -193,7 +271,7 @@ fn signal_process_group(child: &Child) -> Result<(), CommandError> {
 }
 
 #[cfg(not(unix))]
-fn signal_process_group(_child: &Child) -> Result<(), CommandError> {
+fn signal_process_group(_child_pid: u32) -> Result<(), CommandError> {
     Ok(())
 }
 
@@ -201,7 +279,7 @@ fn signal_process_group(_child: &Child) -> Result<(), CommandError> {
 fn terminate_child_tree(child: &mut Child) -> Result<(), CommandError> {
     #[cfg(not(unix))]
     child.kill()?;
-    signal_process_group(child)?;
+    signal_process_group(child.id())?;
     child.wait()?;
     Ok(())
 }
@@ -219,13 +297,15 @@ impl CommandRunner for RealCommandRunner {
         }
         use_own_process_group(&mut command);
         let timeout = spec.timeout.unwrap_or(DEFAULT_TIMEOUT);
+        let max_output = spec.max_output_bytes.unwrap_or(DEFAULT_MAX_OUTPUT_BYTES);
         let mut child = command.spawn()?;
+        let pid = child.id();
 
         // Drain both pipes concurrently with the wait. A child that writes more
         // than the OS pipe buffer (64 KiB on Linux) blocks in `write` until the
         // parent reads, which would otherwise be misreported as a timeout.
-        let stdout_reader = spawn_reader(take_pipe(child.stdout.take())?);
-        let stderr_reader = spawn_reader(take_pipe(child.stderr.take())?);
+        let stdout_reader = spawn_reader(take_pipe(child.stdout.take())?, max_output, pid);
+        let stderr_reader = spawn_reader(take_pipe(child.stderr.take())?, max_output, pid);
 
         let Some(status) = child.wait_timeout(timeout)? else {
             // Kill the whole group: any descendant still holding the inherited
@@ -243,10 +323,15 @@ impl CommandRunner for RealCommandRunner {
         // still hold the inherited pipe write ends. Without releasing the group
         // the reader joins below would block indefinitely, and this path has no
         // timeout to fall back on.
-        signal_process_group(&child)?;
+        signal_process_group(pid)?;
 
-        let stdout_bytes = join_reader(stdout_reader)?;
-        let stderr_bytes = join_reader(stderr_reader)?;
+        let stdout_outcome = join_reader(stdout_reader)?;
+        let stderr_outcome = join_reader(stderr_reader)?;
+        // An overrun kills the child, so its exit status reflects the signal
+        // rather than anything the command decided; report the size violation
+        // before consulting the status at all.
+        let stdout_bytes = require_within_limit(stdout_outcome, max_output, "stdout")?;
+        let stderr_bytes = require_within_limit(stderr_outcome, max_output, "stderr")?;
         if !status.success() {
             let stderr = String::from_utf8_lossy(&stderr_bytes).trim().to_owned();
             return Err(CommandError::NonZero {
@@ -260,95 +345,4 @@ impl CommandRunner for RealCommandRunner {
 }
 
 #[cfg(test)]
-mod tests {
-    //! Tests for real command execution, timeout handling, and error mapping.
-    use super::*;
-    use rstest::rstest;
-    use std::time::Instant;
-
-    #[rstest]
-    fn run_captures_stdout() {
-        let runner = RealCommandRunner;
-        let spec = CommandSpec::new("printf").args(["hello"]);
-        let output = runner.run(&spec).expect("printf runs");
-        assert_eq!(output.stdout, "hello");
-    }
-
-    #[rstest]
-    fn run_reports_non_zero_status() {
-        let runner = RealCommandRunner;
-        let spec = CommandSpec::new("false");
-        let err = runner.run(&spec).expect_err("false exits non-zero");
-        assert!(matches!(err, CommandError::NonZero { .. }));
-    }
-
-    #[rstest]
-    fn run_captures_output_larger_than_the_pipe_buffer() {
-        // The child writes far more than the 64 KiB pipe buffer before exiting.
-        // Without concurrent draining it would block in `write` and be
-        // misreported as a timeout.
-        let runner = RealCommandRunner;
-        let spec = CommandSpec::new("sh")
-            .args(["-c", "head -c 200000 /dev/zero | tr '\\0' 'x'; exit 0"])
-            .timeout(Duration::from_secs(30));
-        let output = runner.run(&spec).expect("large output must not time out");
-        assert_eq!(output.stdout.len(), 200_000);
-    }
-
-    #[rstest]
-    fn run_returns_promptly_when_a_descendant_outlives_the_child() {
-        // The direct child exits immediately, so the timeout path never runs,
-        // but it leaves a backgrounded grandchild holding the inherited pipes.
-        // Without releasing the process group the reader joins would block for
-        // the grandchild's whole lifetime with no timeout to rescue them.
-        let runner = RealCommandRunner;
-        let spec = CommandSpec::new("sh")
-            .args(["-c", "sleep 30 & exit 0"])
-            .timeout(Duration::from_secs(20));
-
-        let started = Instant::now();
-        let output = runner.run(&spec).expect("child exits successfully");
-        let elapsed = started.elapsed();
-
-        assert!(output.stdout.is_empty());
-        assert!(
-            elapsed < Duration::from_secs(5),
-            "run() must not wait on a surviving descendant, took {elapsed:?}"
-        );
-    }
-
-    #[rstest]
-    fn run_times_out_promptly_despite_a_pipe_inheriting_descendant() {
-        // The direct child stalls past the timeout so the kill path runs, and
-        // it first backgrounds a grandchild that inherits the stdout/stderr
-        // pipes. Killing only the direct child would leave the grandchild
-        // holding the write end, so the readers would never reach EOF and the
-        // join would block instead of returning the timeout.
-        let runner = RealCommandRunner;
-        let spec = CommandSpec::new("sh")
-            .args(["-c", "sleep 30 & sleep 5"])
-            .timeout(Duration::from_millis(200));
-
-        let started = Instant::now();
-        let err = runner
-            .run(&spec)
-            .expect_err("stalled command must time out");
-        let elapsed = started.elapsed();
-
-        assert!(matches!(err, CommandError::Timeout { .. }));
-        assert!(
-            elapsed < Duration::from_secs(5),
-            "timeout must return promptly, took {elapsed:?}"
-        );
-    }
-
-    #[rstest]
-    fn run_times_out_a_stalled_command() {
-        let runner = RealCommandRunner;
-        let spec = CommandSpec::new("sleep")
-            .args(["5"])
-            .timeout(Duration::from_millis(100));
-        let err = runner.run(&spec).expect_err("sleep exceeds the timeout");
-        assert!(matches!(err, CommandError::Timeout { .. }));
-    }
-}
+mod tests;

@@ -153,6 +153,89 @@ fn install_preserves_restrictive_permissions(workspace: Workspace) -> Result<(),
     Ok(())
 }
 
+/// Two simultaneous installs must serialize, leaving one well-formed block.
+///
+/// Both writers target the same `# dbar: begin`..`# dbar: end` block, so
+/// "both updates survive" is impossible by design: the install that takes the
+/// lock second legitimately supersedes the first. What the lock buys is
+/// serializability and integrity — exactly one marker pair, unrelated content
+/// intact, and a file that is a single valid block rather than an interleaved
+/// mixture of two runs.
+#[rstest]
+#[expect(
+    clippy::panic_in_result_fn,
+    reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
+)]
+fn concurrent_installs_leave_one_well_formed_block(
+    workspace: Workspace,
+) -> Result<(), InstallError> {
+    let (_temp_dir, path) = workspace?;
+    let unrelated = "# unrelated\nset -g mouse on\n";
+    write(&path, unrelated).expect("seed config");
+
+    let left_path = path.clone();
+    let right_path = path.clone();
+    let left =
+        std::thread::spawn(move || install(Some(left_path), StatusPosition::Left, false, false));
+    let right =
+        std::thread::spawn(move || install(Some(right_path), StatusPosition::Right, false, false));
+    left.join()
+        .expect("left install thread")
+        .expect("left install succeeds");
+    right
+        .join()
+        .expect("right install thread")
+        .expect("right install succeeds");
+
+    let contents = read_to_string(&path).expect("read config");
+    assert_eq!(
+        contents.matches(MARKER_START).count(),
+        1,
+        "exactly one start marker: {contents}"
+    );
+    assert_eq!(
+        contents.matches(MARKER_END).count(),
+        1,
+        "exactly one end marker: {contents}"
+    );
+    assert!(
+        contents.starts_with(unrelated),
+        "unrelated content must survive byte for byte: {contents}"
+    );
+
+    // Whichever install won, the file must already hold its snippet verbatim:
+    // a re-run reports no update only if the block is well formed.
+    let (winner, loser) = if contents.contains("set -g status-right ") {
+        (StatusPosition::Right, StatusPosition::Left)
+    } else {
+        (StatusPosition::Left, StatusPosition::Right)
+    };
+    assert_eq!(
+        contents,
+        format!("{unrelated}{}", build_snippet(winner, false)),
+        "the file must equal a serial execution's result"
+    );
+
+    // The backup is the sharpest witness that the two runs were serialized:
+    // under the lock the loser completes first, so the winner's backup captures
+    // the loser's output. Two unsynchronized runs would both back up the seed
+    // instead, losing the intermediate state the backup is meant to preserve.
+    let backup = backup_path_for(&path);
+    let backed_up = read_to_string(&backup).expect("read backup");
+    assert_eq!(
+        backed_up,
+        format!("{unrelated}{}", build_snippet(loser, false)),
+        "the backup must hold the config as it stood immediately before the winning install"
+    );
+
+    let repeat = install(Some(path), winner, false, false).expect("re-install the winner");
+    assert!(
+        !repeat.updated,
+        "the winning snippet must already be installed verbatim: {contents}"
+    );
+    Ok(())
+}
+
 #[rstest]
 fn install_without_path_reports_missing_path() {
     let err = install(None, StatusPosition::Left, true, false).expect_err("no path supplied");

@@ -2,17 +2,29 @@
 
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use cap_std::ambient_authority;
-use cap_std::fs_utf8::Dir;
+use cap_std::fs_utf8::{Dir, File, OpenOptions};
 use thiserror::Error;
 
 use crate::types::StatusPosition;
 
 const MARKER_START: &str = "# dbar: begin";
 const MARKER_END: &str = "# dbar: end";
+
+/// How many times the exclusive lock is attempted before giving up.
+///
+/// The retry budget is deliberately bounded: `LOCK_ATTEMPTS` tries spaced
+/// `LOCK_RETRY_DELAY` apart is roughly one second in total, long enough to
+/// absorb a competing install's read-modify-write yet short enough that a stale
+/// holder never wedges the command indefinitely.
+const LOCK_ATTEMPTS: u32 = 20;
+
+/// How long to wait between lock attempts.
+const LOCK_RETRY_DELAY: Duration = Duration::from_millis(50);
 
 /// Disambiguates temp-file names for concurrent writers within one process.
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -44,6 +56,9 @@ pub enum InstallError {
     /// Existing markers are missing a closing delimiter.
     #[error("tmux config markers are incomplete")]
     IncompleteMarkers,
+    /// Another install is already updating this configuration file.
+    #[error("tmux config is locked by another install; try again")]
+    Locked,
     /// IO failures while reading or writing the config file, including backups.
     #[error("failed to read or write tmux config: {0}")]
     Io(#[from] std::io::Error),
@@ -76,6 +91,21 @@ pub fn install(
 ) -> Result<InstallOutcome, InstallError> {
     let config_path = config_path_opt.ok_or(InstallError::MissingPath)?;
     let snippet = build_snippet(position, full);
+
+    // Serialize the whole read-modify-write against competing installs. The
+    // guard is bound for the rest of the function so the read, the backup, and
+    // the final rename form one transaction; it is released when the file is
+    // dropped on return.
+    //
+    // A dry run takes no lock: it mutates nothing, and because every write
+    // lands by atomic rename it can only ever observe a whole file, never a
+    // torn one. Locking would also create the lock file — and its parent
+    // directory — for a run that promises to leave the filesystem untouched.
+    let _lock = if dry_run {
+        None
+    } else {
+        Some(acquire_lock(&config_path)?)
+    };
 
     let existing = match read_to_string(&config_path) {
         Ok(contents) => contents,
@@ -173,8 +203,81 @@ fn build_snippet(position: StatusPosition, full: bool) -> String {
     format!("{MARKER_START}\nset -g {target} '#({command})'\n{length_line}{MARKER_END}\n")
 }
 
+/// The single, fixed backup path for a config file.
+///
+/// `.dbar.bak` always holds the config's contents immediately before the most
+/// recent successful install; each install overwrites it rather than keeping a
+/// history. Concurrent installs are safe only because the per-config lock makes
+/// each backup-then-write pair atomic as a unit, so the backup is never a mix
+/// of two runs.
 fn backup_path_for(path: &Utf8Path) -> Utf8PathBuf {
     Utf8PathBuf::from(format!("{}.dbar.bak", path.as_str()))
+}
+
+/// The sibling lock file guarding a config file's install transaction.
+fn lock_path_for(path: &Utf8Path) -> Utf8PathBuf {
+    Utf8PathBuf::from(format!("{}.dbar.lock", path.as_str()))
+}
+
+/// Take the exclusive install lock for `config_path`, retrying briefly.
+///
+/// Returns the locked file, which must be held for the duration of the
+/// transaction: the lock is released when it is dropped. Returns
+/// [`InstallError::Locked`] once the retry budget is exhausted.
+fn acquire_lock(config_path: &Utf8Path) -> Result<File, InstallError> {
+    let file = open_lock_file(config_path)?;
+    let mut remaining = LOCK_ATTEMPTS;
+    while remaining > 0 {
+        if try_lock_exclusive(&file)? {
+            return Ok(file);
+        }
+        remaining -= 1;
+        if remaining > 0 {
+            std::thread::sleep(LOCK_RETRY_DELAY);
+        }
+    }
+    Err(InstallError::Locked)
+}
+
+/// Open — creating if absent — the lock file beside the config.
+///
+/// The lock file is never removed. `flock` locks an inode rather than a path,
+/// so unlinking it would reintroduce a TOCTOU race: a second process could
+/// create and lock a fresh inode for the same path while the first still holds
+/// the old one, and both would then believe they hold the config exclusively.
+/// An empty sibling file is a cheap price for that guarantee.
+fn open_lock_file(config_path: &Utf8Path) -> Result<File, InstallError> {
+    let lock_path = lock_path_for(config_path);
+    let (dir, file_name) = open_parent_for_write(&lock_path)?;
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true);
+    Ok(dir.open_with(file_name, &options)?)
+}
+
+/// Attempt a non-blocking exclusive `flock`, reporting whether it was taken.
+#[cfg(unix)]
+fn try_lock_exclusive(file: &File) -> Result<bool, InstallError> {
+    use rustix::fs::{FlockOperation, flock};
+    use rustix::io::Errno;
+
+    match flock(file, FlockOperation::NonBlockingLockExclusive) {
+        Ok(()) => Ok(true),
+        // `EWOULDBLOCK` and `EAGAIN` share a value on Linux but not everywhere,
+        // so both are matched by comparison rather than by pattern.
+        Err(err) if err == Errno::WOULDBLOCK || err == Errno::AGAIN => Ok(false),
+        Err(err) => Err(InstallError::Io(io::Error::from(err))),
+    }
+}
+
+/// Platforms without `flock` fall back to no synchronization, matching the
+/// process-group precedent in `crate::command`.
+#[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the signature must match the unix implementation"
+)]
+fn try_lock_exclusive(_file: &File) -> Result<bool, InstallError> {
+    Ok(true)
 }
 
 fn read_to_string(path: &Utf8Path) -> Result<String, InstallError> {

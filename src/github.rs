@@ -11,6 +11,12 @@ use crate::types::PrNumber;
 /// Network probes should fail fast so the tmux status line stays responsive.
 const GH_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// A PR number is a handful of bytes, so cap the reply well below the global
+/// ceiling. A `gh` that floods stdout is terminated instead of being buffered,
+/// and the oversized reply degrades to the branch-derived fallback rather than
+/// stalling the status line.
+const GH_MAX_OUTPUT_BYTES: usize = 64 * 1024;
+
 /// GitHub client interface used for PR lookup.
 pub trait GitHubClient {
     /// Resolve a PR number for the given project directory and branch.
@@ -72,7 +78,8 @@ impl GitHubClient for GhCliClient<'_> {
                 &CommandSpec::new("gh")
                     .args(["pr", "view", "--json", "number", "--jq", ".number"])
                     .cwd(project_dir.to_path_buf())
-                    .timeout(GH_TIMEOUT),
+                    .timeout(GH_TIMEOUT)
+                    .max_output_bytes(GH_MAX_OUTPUT_BYTES),
             )
             .map_err(GitHubError::Command)?
             .stdout;
@@ -235,7 +242,8 @@ mod tests {
         let expected = CommandSpec::new("gh")
             .args(["pr", "view", "--json", "number", "--jq", ".number"])
             .cwd(project_dir.to_path_buf())
-            .timeout(GH_TIMEOUT);
+            .timeout(GH_TIMEOUT)
+            .max_output_bytes(GH_MAX_OUTPUT_BYTES);
         assert_eq!(*spec, expected);
     }
 
