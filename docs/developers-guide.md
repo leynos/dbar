@@ -149,9 +149,10 @@ carries time:
 - `command::CommandRunner` — `fn run(&self, spec: &CommandSpec) ->
   Result<CommandOutput, CommandError>`. `RealCommandRunner` executes real
   processes (with a timeout, process-group termination, and concurrent pipe
-  draining; see "Real command execution" below). Tests provide a stub that
-  implements `CommandRunner` and returns canned `CommandOutput`s or errors
-  for known `CommandSpec`s.
+  draining; see "Real command execution" below). The trait carries
+  `#[cfg_attr(test, mockall::automock)]`, so test builds also get a
+  `MockCommandRunner` that returns canned `CommandOutput`s or errors for the
+  `CommandSpec`s a test expects.
 - `github::GitHubClient` — `fn pr_number(&self, project_dir: &Utf8Path,
   branch: &str) -> Result<Option<PrNumber>, GitHubError>`. `GhCliClient`
   wraps a `&dyn CommandRunner` to shell out to `gh`; `MockGitHubClient`
@@ -165,13 +166,31 @@ network access, a real `git`/`gh`/`tmux` binary, or environment-variable
 mutation to exercise the orchestration logic in `git/mod.rs`, `tmux/mod.rs`,
 and `status/mod.rs`.
 
-`src/git/tests.rs` and `src/tmux/tests.rs` each define a private `StubRunner`
-as a worked example of a `CommandRunner` double: `git/tests.rs`'s stub maps
-exact `CommandSpec` values to canned stdout via a `HashMap`, while
-`tmux/tests.rs`'s stub returns one canned response (or an error) and counts
-how many times it was called, to prove short-circuiting. New tests needing a
-`CommandRunner` double should follow one of these two patterns rather than
-introducing a new abstraction.
+`mockall` is an approved dependency of this repository, and every seam it
+covers must be doubled by injecting a generated mock rather than a bespoke
+hand-written stub. A test needing a `CommandRunner` therefore constructs a
+`MockCommandRunner`, configures `expect_run()` with a `mockall::predicate`
+matcher over the expected `&CommandSpec`, and states the return value and the
+call count; hand-rolling a type that implements `CommandRunner` is not
+acceptable.
+
+Two expectation styles are in use, and either is fine so long as the test
+reads clearly:
+
+- One expectation per spec, keyed by `with(predicate::eq(spec))`, as in
+  `src/github.rs` and `src/tmux/tests.rs`. This makes the specification itself
+  an assertion, because a query built from the wrong arguments matches nothing
+  and fails the test.
+- A single expectation whose closure switches on the spec it is handed, as in
+  `src/git/tests.rs`. This suits probes whose canned answers a fixture
+  supplies and individual tests then override, because separate expectations
+  are matched in declaration order and the fixture's defaults are declared
+  first.
+
+Call counts are expressed with mockall's own counting — `times(1)`,
+`times(1..)`, or `never()` — rather than a counter threaded through a stub, so
+a violated expectation fails the test where it happens or when the mock is
+dropped.
 
 ## Tooling and gates
 

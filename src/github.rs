@@ -182,51 +182,41 @@ pub enum GitHubError {
 mod tests {
     //! Tests for `gh` PR parsing, failure propagation, and the mock client.
     use super::*;
-    use crate::command::{CommandError, CommandOutput, CommandRunner};
+    use crate::command::{CommandError, CommandOutput, MockCommandRunner};
+    use mockall::predicate::eq;
     use rstest::rstest;
-    use std::cell::RefCell;
 
-    /// Records the spec it was given and returns a canned result.
-    struct StubRunner {
-        result: Result<String, CommandError>,
-        seen: RefCell<Option<CommandSpec>>,
+    /// The project directory every lookup under test is rooted at.
+    const PROJECT_DIR: &str = "/projects/demo";
+
+    /// The spec `pr_number` is expected to build for `branch`.
+    fn expected_spec(project_dir: &Utf8Path, branch: &str) -> CommandSpec {
+        // The working directory scopes `gh` to the right repository, the
+        // positional branch overrides the current checkout, and the timeout
+        // keeps a stalled network call off the status path.
+        CommandSpec::new("gh")
+            .args([
+                "pr", "view", "--json", "number", "--jq", ".number", "--", branch,
+            ])
+            .cwd(project_dir.to_path_buf())
+            .timeout(GH_TIMEOUT)
+            .max_output_bytes(GH_MAX_OUTPUT_BYTES)
     }
 
-    impl StubRunner {
-        fn ok(stdout: &str) -> Self {
-            Self {
-                result: Ok(stdout.to_owned()),
-                seen: RefCell::new(None),
-            }
-        }
-
-        fn failing() -> Self {
-            Self {
-                result: Err(CommandError::NonZero {
-                    status: Some(1),
-                    stderr: "no pull requests found".to_owned(),
-                }),
-                seen: RefCell::new(None),
-            }
-        }
-    }
-
-    impl CommandRunner for StubRunner {
-        fn run(&self, spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
-            *self.seen.borrow_mut() = Some(spec.clone());
-            match &self.result {
-                Ok(stdout) => Ok(CommandOutput {
-                    stdout: stdout.clone(),
-                }),
-                Err(CommandError::NonZero { status, stderr }) => Err(CommandError::NonZero {
-                    status: *status,
-                    stderr: stderr.clone(),
-                }),
-                Err(_) => Err(CommandError::Timeout {
-                    timeout: GH_TIMEOUT,
-                }),
-            }
-        }
+    /// A runner that answers the one expected lookup with `stdout`.
+    fn runner_answering(stdout: &str) -> MockCommandRunner {
+        let answer = stdout.to_owned();
+        let mut runner = MockCommandRunner::new();
+        runner
+            .expect_run()
+            .with(eq(expected_spec(Utf8Path::new(PROJECT_DIR), "main")))
+            .times(1)
+            .returning(move |_| {
+                Ok(CommandOutput {
+                    stdout: answer.clone(),
+                })
+            });
+        runner
     }
 
     #[rstest]
@@ -234,10 +224,10 @@ mod tests {
     #[case::trailing_newline("42\n", "42")]
     #[case::surrounding_space("  7  ", "7")]
     fn pr_number_parses_gh_output(#[case] stdout: &str, #[case] expected: &str) {
-        let runner = StubRunner::ok(stdout);
+        let runner = runner_answering(stdout);
         let client = GhCliClient::new(&runner);
         let pr = client
-            .pr_number(Utf8Path::new("/projects/demo"), "main")
+            .pr_number(Utf8Path::new(PROJECT_DIR), "main")
             .expect("lookup succeeds");
         assert_eq!(pr.map(|value| value.to_string()).as_deref(), Some(expected));
     }
@@ -246,20 +236,30 @@ mod tests {
     #[case::empty("")]
     #[case::whitespace_only("   \n")]
     fn pr_number_reports_no_pr_for_empty_output(#[case] stdout: &str) {
-        let runner = StubRunner::ok(stdout);
+        let runner = runner_answering(stdout);
         let client = GhCliClient::new(&runner);
         let pr = client
-            .pr_number(Utf8Path::new("/projects/demo"), "main")
+            .pr_number(Utf8Path::new(PROJECT_DIR), "main")
             .expect("lookup succeeds");
         assert!(pr.is_none(), "empty gh output means no open PR");
     }
 
     #[rstest]
     fn pr_number_propagates_command_failure() {
-        let runner = StubRunner::failing();
+        let mut runner = MockCommandRunner::new();
+        runner
+            .expect_run()
+            .with(eq(expected_spec(Utf8Path::new(PROJECT_DIR), "main")))
+            .times(1)
+            .returning(|_| {
+                Err(CommandError::NonZero {
+                    status: Some(1),
+                    stderr: "no pull requests found".to_owned(),
+                })
+            });
         let client = GhCliClient::new(&runner);
         let err = client
-            .pr_number(Utf8Path::new("/projects/demo"), "main")
+            .pr_number(Utf8Path::new(PROJECT_DIR), "main")
             .expect_err("command failure must propagate");
         let GitHubError::Command(CommandError::NonZero { status, stderr }) = err else {
             panic!("expected a propagated non-zero command error");
@@ -274,24 +274,22 @@ mod tests {
     // being parsed as a flag, which is what the `--` separator guarantees.
     #[case::dash_prefixed_branch("-weird-branch")]
     fn pr_number_builds_the_expected_command_spec(#[case] branch: &str) {
-        let runner = StubRunner::ok("1");
+        let project_dir = Utf8Path::new(PROJECT_DIR);
+        // The expectation itself is the assertion: any other spec fails to
+        // match and the mock panics, and `times(1)` fails the test at drop if
+        // the lookup never ran.
+        let mut runner = MockCommandRunner::new();
+        runner
+            .expect_run()
+            .with(eq(expected_spec(project_dir, branch)))
+            .times(1)
+            .returning(|_| {
+                Ok(CommandOutput {
+                    stdout: "1".to_owned(),
+                })
+            });
         let client = GhCliClient::new(&runner);
-        let project_dir = Utf8Path::new("/projects/demo");
         let _ = client.pr_number(project_dir, branch).expect("lookup");
-
-        let seen = runner.seen.borrow();
-        let spec = seen.as_ref().expect("the runner was invoked");
-        // The working directory scopes `gh` to the right repository, the
-        // positional branch overrides the current checkout, and the timeout
-        // keeps a stalled network call off the status path.
-        let expected = CommandSpec::new("gh")
-            .args([
-                "pr", "view", "--json", "number", "--jq", ".number", "--", branch,
-            ])
-            .cwd(project_dir.to_path_buf())
-            .timeout(GH_TIMEOUT)
-            .max_output_bytes(GH_MAX_OUTPUT_BYTES);
-        assert_eq!(*spec, expected);
     }
 
     #[rstest]
@@ -340,7 +338,7 @@ mod tests {
     ) {
         let client = MockGitHubClient::new(configured);
         let pr = client
-            .pr_number(Utf8Path::new("/projects/demo"), "main")
+            .pr_number(Utf8Path::new(PROJECT_DIR), "main")
             .expect("the mock never fails");
         assert_eq!(pr.map(|value| value.to_string()).as_deref(), expected);
     }

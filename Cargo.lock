@@ -418,6 +418,7 @@ dependencies = [
  "directories",
  "insta",
  "mockable",
+ "mockall 0.15.0",
  "ortho_config",
  "proptest",
  "rstest",
@@ -1089,7 +1090,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e54ab86571e818ddc6b7c5bf511c7850d6680a4a80551f0e0dc786971d2ab289"
 dependencies = [
  "chrono",
- "mockall",
+ "mockall 0.11.4",
  "tracing",
 ]
 
@@ -1103,8 +1104,22 @@ dependencies = [
  "downcast",
  "fragile",
  "lazy_static",
- "mockall_derive",
+ "mockall_derive 0.11.4",
  "predicates 2.1.5",
+ "predicates-tree",
+]
+
+[[package]]
+name = "mockall"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a6ceddfe3ce334925e96bf420fdb2dcee5bed6c632a168ece622676dadeaf8a"
+dependencies = [
+ "cfg-if",
+ "downcast",
+ "fragile",
+ "mockall_derive 0.15.0",
+ "predicates 3.1.4",
  "predicates-tree",
 ]
 
@@ -1118,6 +1133,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "mockall_derive"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cfe16fbe8a314aeec0b861ac24e60b1e123e97634bab045475b9d6a18416fd8"
+dependencies = [
+ "cfg-if",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

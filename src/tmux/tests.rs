@@ -2,55 +2,62 @@
 //! typed outcomes for pre-resolved contexts, empty answers, and failures.
 
 use super::*;
-use crate::command::{CommandError, CommandOutput};
+use crate::command::{CommandError, CommandOutput, MockCommandRunner};
+use mockall::predicate::eq;
 use rstest::rstest;
-use std::cell::Cell;
-use std::collections::HashMap;
 
-/// A runner that maps each requested `display-message` specification to a
-/// canned stdout, failing for unknown specifications, and counting how many
-/// times it was consulted.
-#[derive(Default)]
-struct StubRunner {
-    outputs: HashMap<CommandSpec, String>,
-    calls: Cell<usize>,
+/// The failure a query gets when tmux cannot answer it.
+fn query_failure() -> CommandError {
+    CommandError::NonZero {
+        status: Some(1),
+        stderr: String::new(),
+    }
 }
 
-impl StubRunner {
+/// The canned `display-message` answers for the four tmux fields; a `None`
+/// answer makes that field's query fail, as a dead server would.
+///
+/// Each field gets its own `expect_run` keyed by an `eq` matcher on the exact
+/// specification, so a query for the wrong format string matches nothing and
+/// fails the test rather than being silently answered.
+struct Answers(Vec<(TmuxField, Option<String>)>);
+
+impl Answers {
     /// Answer all four tmux fields with the given raw stdout values.
     fn with_fields(session: &str, window: &str, pane: &str, socket: &str) -> Self {
-        let mut outputs = HashMap::new();
-        outputs.insert(field_spec(TmuxField::Session.format()), session.to_owned());
-        outputs.insert(field_spec(TmuxField::Window.format()), window.to_owned());
-        outputs.insert(field_spec(TmuxField::Pane.format()), pane.to_owned());
-        outputs.insert(field_spec(TmuxField::Socket.format()), socket.to_owned());
-        Self {
-            outputs,
-            ..Self::default()
-        }
+        Self(vec![
+            (TmuxField::Session, Some(session.to_owned())),
+            (TmuxField::Window, Some(window.to_owned())),
+            (TmuxField::Pane, Some(pane.to_owned())),
+            (TmuxField::Socket, Some(socket.to_owned())),
+        ])
     }
 
     /// Drop one field so its query fails, simulating a partial answer.
     fn without_field(mut self, field: TmuxField) -> Self {
-        self.outputs.remove(&field_spec(field.format()));
+        for (name, answer) in &mut self.0 {
+            if *name == field {
+                *answer = None;
+            }
+        }
         self
     }
-}
 
-impl CommandRunner for StubRunner {
-    fn run(&self, spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
-        self.calls.set(self.calls.get() + 1);
-        self.outputs.get(spec).map_or(
-            Err(CommandError::NonZero {
-                status: Some(1),
-                stderr: String::new(),
-            }),
-            |stdout| {
-                Ok(CommandOutput {
-                    stdout: stdout.clone(),
-                })
-            },
-        )
+    /// Build a mock runner carrying one expectation per field.
+    fn build(self) -> MockCommandRunner {
+        let mut runner = MockCommandRunner::new();
+        for (field, answer) in self.0 {
+            runner
+                .expect_run()
+                .with(eq(field_spec(field.format())))
+                .returning(move |_| {
+                    answer.clone().map_or_else(
+                        || Err(query_failure()),
+                        |stdout| Ok(CommandOutput { stdout }),
+                    )
+                });
+        }
+        runner
     }
 }
 
@@ -67,19 +74,20 @@ fn context_of(session: &str, window: &str, pane: &str, socket: &str) -> TmuxCont
 fn resolve_context_short_circuits_when_complete() {
     // Asserting the runner was never consulted is what proves the
     // short-circuit: returning the context unchanged would also happen if
-    // the runner were called and simply errored.
-    let runner = StubRunner::default();
+    // the runner were called and simply errored. `never()` fails the test on
+    // the first query rather than after the fact.
+    let mut runner = MockCommandRunner::new();
+    runner.expect_run().never();
     let context = context_of("sess", "1", "%0", "/tmp/sock");
     let resolution = resolve_context(&runner, context);
     assert!(matches!(resolution.outcome, TmuxOutcome::PreResolved));
     assert_eq!(resolution.context.session.as_deref(), Some("sess"));
     assert_eq!(resolution.context.socket.as_deref(), Some("/tmp/sock"));
-    assert_eq!(runner.calls.get(), 0);
 }
 
 #[rstest]
 fn resolve_context_fills_missing_fields() {
-    let runner = StubRunner::with_fields("sess", "1", "%0", "/tmp/sock\n");
+    let runner = Answers::with_fields("sess", "1", "%0", "/tmp/sock\n").build();
     let resolution = resolve_context(&runner, TmuxContext::default());
     assert_eq!(resolution.context.session.as_deref(), Some("sess"));
     assert_eq!(resolution.context.window.as_deref(), Some("1"));
@@ -91,7 +99,7 @@ fn resolve_context_fills_missing_fields() {
 
 #[rstest]
 fn resolve_context_preserves_prepopulated_fields() {
-    let runner = StubRunner::with_fields("other", "9", "%9", "/tmp/other");
+    let runner = Answers::with_fields("other", "9", "%9", "/tmp/other").build();
     let context = TmuxContext {
         session: Some("mine".to_owned()),
         ..TmuxContext::default()
@@ -103,7 +111,7 @@ fn resolve_context_preserves_prepopulated_fields() {
 
 #[rstest]
 fn resolve_context_reports_empty_response_fields() {
-    let runner = StubRunner::with_fields("sess", "", "%0", "");
+    let runner = Answers::with_fields("sess", "", "%0", "").build();
     let resolution = resolve_context(&runner, TmuxContext::default());
     assert_eq!(resolution.context.session.as_deref(), Some("sess"));
     // The rendered contract is unchanged: an empty answer leaves the field
@@ -133,7 +141,9 @@ fn resolve_context_reports_empty_response_fields() {
 #[case::session(TmuxField::Session)]
 #[case::pane(TmuxField::Pane)]
 fn resolve_context_reports_a_failed_query(#[case] missing: TmuxField) {
-    let runner = StubRunner::with_fields("sess", "1", "%0", "/tmp/sock").without_field(missing);
+    let runner = Answers::with_fields("sess", "1", "%0", "/tmp/sock")
+        .without_field(missing)
+        .build();
     let resolution = resolve_context(&runner, TmuxContext::default());
     // A partial answer must leave the context untouched, as before ...
     assert_eq!(resolution.context.session, None);
@@ -154,7 +164,7 @@ fn resolve_context_reports_a_failed_query(#[case] missing: TmuxField) {
 fn resolve_context_handles_session_name_containing_a_pipe() {
     // tmux forbids only `:` and `.` in session names, so `|` is legal and
     // must not be mistaken for a field separator.
-    let runner = StubRunner::with_fields("a|b", "3", "%2", "/tmp/sock");
+    let runner = Answers::with_fields("a|b", "3", "%2", "/tmp/sock").build();
     let resolution = resolve_context(&runner, TmuxContext::default());
     assert_eq!(resolution.context.session.as_deref(), Some("a|b"));
     assert_eq!(resolution.context.window.as_deref(), Some("3"));
@@ -164,7 +174,7 @@ fn resolve_context_handles_session_name_containing_a_pipe() {
 
 #[rstest]
 fn resolve_context_handles_socket_path_containing_a_pipe() {
-    let runner = StubRunner::with_fields("sess", "3", "%2", "/tmp/weird|socket");
+    let runner = Answers::with_fields("sess", "3", "%2", "/tmp/weird|socket").build();
     let resolution = resolve_context(&runner, TmuxContext::default());
     assert_eq!(resolution.context.session.as_deref(), Some("sess"));
     assert_eq!(
@@ -175,12 +185,16 @@ fn resolve_context_handles_socket_path_containing_a_pipe() {
 
 #[rstest]
 fn resolve_context_reports_an_unavailable_server() {
-    let runner = StubRunner::default();
+    // The runner must have been consulted, otherwise this test would pass
+    // even if `resolve_context` never queried tmux at all; `times(1..)` is
+    // that assertion, checked when the mock is dropped.
+    let mut runner = MockCommandRunner::new();
+    runner
+        .expect_run()
+        .times(1..)
+        .returning(|_| Err(query_failure()));
     let resolution = resolve_context(&runner, TmuxContext::default());
     assert_eq!(resolution.context.session, None);
-    // The runner must have been consulted, otherwise this test would pass
-    // even if `resolve_context` never queried tmux at all.
-    assert!(runner.calls.get() > 0);
     assert!(matches!(
         resolution.outcome,
         TmuxOutcome::Unavailable(TmuxProbeFailure::CommandFailed {

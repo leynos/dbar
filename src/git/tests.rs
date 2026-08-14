@@ -3,8 +3,7 @@
 //! failures.
 
 use super::*;
-use crate::command::{CommandError, CommandOutput, CommandRunner, CommandSpec};
-use camino::Utf8PathBuf;
+use crate::command::{CommandError, CommandOutput, CommandSpec, MockCommandRunner};
 use rstest::{fixture, rstest};
 use std::collections::HashMap;
 
@@ -17,29 +16,33 @@ const BRANCH_ARGS: &[&str] = &["branch", "--show-current"];
 const PORCELAIN_ARGS: &[&str] = &["status", "--porcelain"];
 const UPSTREAM_ARGS: &[&str] = &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"];
 
-/// A runner that maps exact command specs to canned stdout, failing for
-/// anything it was not given.
+/// The canned answers a test wants a [`MockCommandRunner`] to give, keyed by
+/// the exact spec each probe is expected to build.
+///
+/// `git_status` runs several probes whose answers a test refines one at a
+/// time, so the expectation is a single `expect_run` whose closure switches on
+/// the spec: separate per-spec expectations would be matched in declaration
+/// order, and the fixture's defaults are declared before the overrides that
+/// are meant to replace them.
 #[derive(Default)]
-struct StubRunner {
-    outputs: HashMap<CommandSpec, CommandOutput>,
+struct Answers {
+    outputs: HashMap<CommandSpec, String>,
 }
 
-impl StubRunner {
-    /// Record a canned answer for a spec, replacing any previous one.
-    fn with_output(mut self, spec: CommandSpec, stdout: &str) -> Self {
+impl Answers {
+    /// Answer one probe rooted at `project_dir` with `stdout`, replacing any
+    /// previous answer for the same spec.
+    fn answering_in(mut self, project_dir: &Utf8Path, args: &[&str], stdout: &str) -> Self {
         self.outputs.insert(
-            spec,
-            CommandOutput {
-                stdout: stdout.to_owned(),
-            },
+            git_command(project_dir, args.iter().copied()),
+            stdout.to_owned(),
         );
         self
     }
 
     /// Answer one probe rooted at [`REPO_DIR`] with `stdout`.
     fn answering(self, args: &[&str], stdout: &str) -> Self {
-        let spec = git_command(Utf8Path::new(REPO_DIR), args.iter().copied());
-        self.with_output(spec, stdout)
+        self.answering_in(Utf8Path::new(REPO_DIR), args, stdout)
     }
 
     /// Drop one probe's answer so the runner reports a command failure.
@@ -48,24 +51,33 @@ impl StubRunner {
             .remove(&git_command(Utf8Path::new(REPO_DIR), args.iter().copied()));
         self
     }
-}
 
-impl CommandRunner for StubRunner {
-    fn run(&self, spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
-        self.outputs
-            .get(spec)
-            .cloned()
-            .ok_or(CommandError::NonZero {
-                status: Some(1),
-                stderr: String::new(),
-            })
+    /// Build a mock runner that serves these answers and fails every other
+    /// spec, exactly as a `git` that cannot answer the probe would.
+    fn build(self) -> MockCommandRunner {
+        let outputs = self.outputs;
+        let mut runner = MockCommandRunner::new();
+        runner.expect_run().returning(move |spec| {
+            outputs.get(spec).map_or(
+                Err(CommandError::NonZero {
+                    status: Some(1),
+                    stderr: String::new(),
+                }),
+                |stdout| {
+                    Ok(CommandOutput {
+                        stdout: stdout.clone(),
+                    })
+                },
+            )
+        });
+        runner
     }
 }
 
-/// A runner that answers all four probes with healthy defaults.
+/// Answers covering all four probes with healthy defaults.
 #[fixture]
-fn healthy_runner() -> StubRunner {
-    StubRunner::default()
+fn healthy_runner() -> Answers {
+    Answers::default()
         .answering(REPOSITORY_ARGS, "true")
         .answering(BRANCH_ARGS, "main\n")
         .answering(PORCELAIN_ARGS, "")
@@ -98,28 +110,30 @@ fn expect_single_failure(outcome: GitStatusOutcome) -> GitProbeFailure {
 #[case("git@github.com:owner/dbar.git", "dbar")]
 #[case("https://github.com/owner/alpha", "alpha")]
 fn project_name_prefers_origin(#[case] origin: &str, #[case] expected: &str) {
-    let runner = StubRunner::default().with_output(
-        CommandSpec::new("git")
-            .args(["remote", "get-url", "origin"])
-            .cwd(Utf8PathBuf::from("/tmp/demo")),
-        origin,
-    );
+    let runner = Answers::default()
+        .answering_in(
+            Utf8Path::new("/tmp/demo"),
+            &["remote", "get-url", "origin"],
+            origin,
+        )
+        .build();
     let name = project_name(&runner, Utf8Path::new("/tmp/demo"));
     assert_eq!(name.as_ref(), expected);
 }
 
 #[test]
 fn project_name_falls_back_to_worktree_path() {
-    let runner = StubRunner::default();
+    let runner = Answers::default().build();
     let name = project_name(&runner, Utf8Path::new("/tmp/repo.worktrees/feat"));
     assert_eq!(name.as_ref(), "repo");
 }
 
 #[rstest]
-fn git_status_parses_porcelain_and_counts(healthy_runner: StubRunner) {
+fn git_status_parses_porcelain_and_counts(healthy_runner: Answers) {
     let runner = healthy_runner
         .answering(PORCELAIN_ARGS, "MM file.txt\n")
-        .answering(UPSTREAM_ARGS, "1\t2");
+        .answering(UPSTREAM_ARGS, "1\t2")
+        .build();
 
     let report = expect_report(git_status(&runner, repo_dir()));
     // The trailing newline from `git` must be trimmed off the branch name.
@@ -135,10 +149,10 @@ fn git_status_parses_porcelain_and_counts(healthy_runner: StubRunner) {
 #[case::empty("")]
 #[case::whitespace_only("  \n")]
 fn git_status_reports_detached_when_no_branch_is_current(
-    healthy_runner: StubRunner,
+    healthy_runner: Answers,
     #[case] branch_output: &str,
 ) {
-    let runner = healthy_runner.answering(BRANCH_ARGS, branch_output);
+    let runner = healthy_runner.answering(BRANCH_ARGS, branch_output).build();
 
     let report = expect_report(git_status(&runner, repo_dir()));
     // A detached HEAD reports no current branch, so the label falls back ...
@@ -148,8 +162,8 @@ fn git_status_reports_detached_when_no_branch_is_current(
 }
 
 #[rstest]
-fn git_status_reports_not_a_repository(healthy_runner: StubRunner) {
-    let runner = healthy_runner.answering(REPOSITORY_ARGS, "false\n");
+fn git_status_reports_not_a_repository(healthy_runner: Answers) {
+    let runner = healthy_runner.answering(REPOSITORY_ARGS, "false\n").build();
 
     let outcome = git_status(&runner, repo_dir());
     assert!(matches!(outcome, GitStatusOutcome::NotARepository));
@@ -159,8 +173,8 @@ fn git_status_reports_not_a_repository(healthy_runner: StubRunner) {
 }
 
 #[rstest]
-fn git_status_reports_a_malformed_repository_probe(healthy_runner: StubRunner) {
-    let runner = healthy_runner.answering(REPOSITORY_ARGS, "banana");
+fn git_status_reports_a_malformed_repository_probe(healthy_runner: Answers) {
+    let runner = healthy_runner.answering(REPOSITORY_ARGS, "banana").build();
 
     let outcome = git_status(&runner, repo_dir());
     // The rendered contract is the same as "not a repository" ...
@@ -178,8 +192,8 @@ fn git_status_reports_a_malformed_repository_probe(healthy_runner: StubRunner) {
 
 #[rstest]
 fn git_status_reports_a_failed_repository_probe() {
-    // An empty stub fails every command, standing in for a missing `git`.
-    let runner = StubRunner::default();
+    // An empty answer set fails every command, standing in for a missing `git`.
+    let runner = Answers::default().build();
     let outcome = git_status(&runner, repo_dir());
     assert!(outcome.status().is_none());
     let failure = expect_single_failure(outcome);
@@ -195,8 +209,8 @@ fn git_status_reports_a_failed_repository_probe() {
 }
 
 #[rstest]
-fn git_status_reports_a_failed_branch_probe(healthy_runner: StubRunner) {
-    let runner = healthy_runner.failing(BRANCH_ARGS);
+fn git_status_reports_a_failed_branch_probe(healthy_runner: Answers) {
+    let runner = healthy_runner.failing(BRANCH_ARGS).build();
 
     let report = expect_report(git_status(&runner, repo_dir()));
     // The rendered contract is unchanged: the branch still reads "detached".
@@ -211,8 +225,8 @@ fn git_status_reports_a_failed_branch_probe(healthy_runner: StubRunner) {
 }
 
 #[rstest]
-fn git_status_reports_a_failed_worktree_status_probe(healthy_runner: StubRunner) {
-    let runner = healthy_runner.failing(PORCELAIN_ARGS);
+fn git_status_reports_a_failed_worktree_status_probe(healthy_runner: Answers) {
+    let runner = healthy_runner.failing(PORCELAIN_ARGS).build();
 
     let report = expect_report(git_status(&runner, repo_dir()));
     assert!(!report.status.dirty);
@@ -227,10 +241,12 @@ fn git_status_reports_a_failed_worktree_status_probe(healthy_runner: StubRunner)
 }
 
 #[rstest]
-fn git_status_reports_a_malformed_porcelain_line(healthy_runner: StubRunner) {
+fn git_status_reports_a_malformed_porcelain_line(healthy_runner: Answers) {
     // The single-character line cannot carry both status characters; the
     // well-formed line after it must still be classified.
-    let runner = healthy_runner.answering(PORCELAIN_ARGS, "M\n M file.txt\n");
+    let runner = healthy_runner
+        .answering(PORCELAIN_ARGS, "M\n M file.txt\n")
+        .build();
 
     let report = expect_report(git_status(&runner, repo_dir()));
     assert!(report.status.dirty);
@@ -245,8 +261,8 @@ fn git_status_reports_a_malformed_porcelain_line(healthy_runner: StubRunner) {
 }
 
 #[rstest]
-fn git_status_reports_a_failed_upstream_probe(healthy_runner: StubRunner) {
-    let runner = healthy_runner.failing(UPSTREAM_ARGS);
+fn git_status_reports_a_failed_upstream_probe(healthy_runner: Answers) {
+    let runner = healthy_runner.failing(UPSTREAM_ARGS).build();
 
     let report = expect_report(git_status(&runner, repo_dir()));
     assert_eq!(report.status.ahead.value(), 0);
@@ -264,8 +280,8 @@ fn git_status_reports_a_failed_upstream_probe(healthy_runner: StubRunner) {
 #[case::single_field("3")]
 #[case::non_numeric("one\ttwo")]
 #[case::empty("")]
-fn git_status_reports_malformed_upstream_counts(healthy_runner: StubRunner, #[case] stdout: &str) {
-    let runner = healthy_runner.answering(UPSTREAM_ARGS, stdout);
+fn git_status_reports_malformed_upstream_counts(healthy_runner: Answers, #[case] stdout: &str) {
+    let runner = healthy_runner.answering(UPSTREAM_ARGS, stdout).build();
 
     let report = expect_report(git_status(&runner, repo_dir()));
     assert_eq!(report.status.ahead.value(), 0);
