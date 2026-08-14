@@ -41,6 +41,14 @@ pub fn run() -> Result<(), DbarError> {
     }
 }
 
+/// Environment variable that opts into printing probe diagnostics.
+///
+/// The status line degrades silently by design, so the typed failures behind
+/// a degraded line would otherwise be invisible to an operator. Setting this
+/// variable to any value mirrors them to stderr; stdout is untouched either
+/// way, so the tmux contract is unchanged.
+const DIAGNOSTICS_ENV: &str = "DBAR_DIAGNOSTICS";
+
 /// Render a status line segment and print it to stdout.
 #[expect(clippy::print_stdout, reason = "CLI output is the intended behaviour")]
 fn run_status(args: &config::StatusArgs) -> Result<(), DbarError> {
@@ -52,9 +60,24 @@ fn run_status(args: &config::StatusArgs) -> Result<(), DbarError> {
         Some(client) => client,
         None => &gh_client,
     };
-    let line = status::build_status_line(args, &runner, &clock, github)?;
-    println!("{line}");
+    let report = status::build_status_report(args, &runner, &clock, github)?;
+    println!("{}", report.line);
+    report_diagnostics(&report.diagnostics);
     Ok(())
+}
+
+/// Mirror absorbed probe failures to stderr when diagnostics are enabled.
+#[expect(
+    clippy::print_stderr,
+    reason = "opt-in operator diagnostics for silently degraded probes"
+)]
+fn report_diagnostics(diagnostics: &status::StatusDiagnostics) {
+    if std::env::var_os(DIAGNOSTICS_ENV).is_none() {
+        return;
+    }
+    for failure in diagnostics.describe_failures() {
+        eprintln!("dbar: {failure}");
+    }
 }
 
 /// Install the tmux snippet and report the outcome to stdout.
