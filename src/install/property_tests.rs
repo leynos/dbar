@@ -140,14 +140,24 @@ fn scenario() -> impl Strategy<Value = Scenario> {
 ///
 /// The directory is returned alongside the path so the caller keeps it alive
 /// for the duration of the case.
-fn seeded_workspace(existing: &str, present: bool) -> (TempDir, Utf8PathBuf) {
-    let temp_dir = TempDir::new().expect("create temp dir");
+///
+/// Setup failures are reported as `TestCaseError::Fail` rather than unwrapped:
+/// a helper called from a `proptest!` body is not itself a test as far as the
+/// lint suite is concerned, and a failure here means the case never ran, which
+/// is worth distinguishing from a falsified property.
+fn seeded_workspace(
+    existing: &str,
+    present: bool,
+) -> Result<(TempDir, Utf8PathBuf), TestCaseError> {
+    let temp_dir =
+        TempDir::new().map_err(|error| TestCaseError::fail(format!("create temp dir: {error}")))?;
     let path = Utf8PathBuf::from_path_buf(temp_dir.path().join("tmux.conf"))
-        .expect("temp dir path is utf-8");
+        .map_err(|path| TestCaseError::fail(format!("temp dir path is not utf-8: {path:?}")))?;
     if present {
-        write(&path, existing).expect("seed config");
+        write(&path, existing)
+            .map_err(|error| TestCaseError::fail(format!("seed config: {error}")))?;
     }
-    (temp_dir, path)
+    Ok((temp_dir, path))
 }
 
 /// The content `install` actually starts from: an absent file is empty
@@ -240,7 +250,7 @@ proptest! {
     #[test]
     fn install_is_idempotent_across_configurations(scenario in scenario()) {
         let Scenario { existing, present, position, full } = scenario;
-        let (_temp_dir, path) = seeded_workspace(&existing, present);
+        let (_temp_dir, path) = seeded_workspace(&existing, present)?;
 
         let first = install(Some(path.clone()), position, false, full)
             .map_err(|err| TestCaseError::fail(format!("first install failed: {err}")))?;
@@ -272,8 +282,8 @@ proptest! {
         next_full in any::<bool>(),
     ) {
         let Scenario { existing, present, position, full } = scenario;
-        let (_sequential_dir, sequential) = seeded_workspace(&existing, present);
-        let (_direct_dir, direct) = seeded_workspace(&existing, present);
+        let (_sequential_dir, sequential) = seeded_workspace(&existing, present)?;
+        let (_direct_dir, direct) = seeded_workspace(&existing, present)?;
 
         install(Some(sequential.clone()), position, false, full)
             .map_err(|err| TestCaseError::fail(format!("first install failed: {err}")))?;
