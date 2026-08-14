@@ -88,6 +88,12 @@ pub fn pr_cache_path(cache_dir: &Utf8Path, branch: &str, project_dir: &Utf8Path)
     cache_dir.join(format!("pr_{value:016x}.json"))
 }
 
+// Sibling file rather than a `cache_key/` subdirectory, so the path is given
+// explicitly; it resolves relative to this file's directory.
+#[cfg(test)]
+#[path = "cache_key_properties.rs"]
+mod cache_key_properties;
+
 #[cfg(test)]
 mod tests {
     //! Tests for cache-key stability, field framing, and the documented
