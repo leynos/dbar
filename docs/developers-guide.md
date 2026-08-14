@@ -27,7 +27,7 @@ from `run()` based on the parsed `DbarCommand`.
   heuristics with no failure to report. `git_status` returns a
   `GitStatusOutcome` — `Available(GitStatusReport)`, `NotARepository`, or
   `Unavailable(GitProbeFailure)` — so a caller can tell a missing repository
-  apart from a failed or unparseable probe; `GitStatusReport` carries the
+  apart from a failed or unparsable probe; `GitStatusReport` carries the
   `GitStatus` snapshot alongside any field-level `GitProbeFailure`s the
   fallback policy absorbed. See the module's fallback-policy table for what
   each outcome renders.

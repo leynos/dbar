@@ -195,8 +195,7 @@ fn clap_defaults_shadow_configuration_file_values() -> Result<(), FixtureError> 
     clippy::panic_in_result_fn,
     reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
 )]
-fn install_boolean_flags_are_not_settable_from_a_configuration_file()
--> Result<(), FixtureError> {
+fn install_boolean_flags_are_not_settable_from_a_configuration_file() -> Result<(), FixtureError> {
     let _lock = env_lock();
     let file = config_home(concat!(
         "[cmds.install]\n",
