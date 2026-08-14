@@ -70,13 +70,19 @@ impl GitHubClient for GhCliClient<'_> {
     fn pr_number(
         &self,
         project_dir: &Utf8Path,
-        _branch: &str,
+        branch: &str,
     ) -> Result<Option<PrNumber>, GitHubError> {
+        // `gh pr view` resolves the current checkout when given no positional
+        // argument, which is the wrong PR whenever the caller asks about a
+        // branch other than the one checked out. The `--` separator keeps a
+        // branch name that begins with a dash from being parsed as a flag.
         let output = self
             .runner
             .run(
                 &CommandSpec::new("gh")
-                    .args(["pr", "view", "--json", "number", "--jq", ".number"])
+                    .args([
+                        "pr", "view", "--json", "number", "--jq", ".number", "--", branch,
+                    ])
                     .cwd(project_dir.to_path_buf())
                     .timeout(GH_TIMEOUT)
                     .max_output_bytes(GH_MAX_OUTPUT_BYTES),
@@ -130,11 +136,45 @@ impl GitHubClient for MockGitHubClient {
     }
 }
 
+/// Summarize a command failure without echoing the child's captured stderr.
+///
+/// `CommandError::NonZero` carries `gh`'s stderr verbatim, and `gh` prints
+/// authentication diagnostics there — including remote URLs that may embed a
+/// token, as in `https://x-access-token:<token>@github.com/...`. This message
+/// reaches the tmux status line and any log that renders it, so only the
+/// failure category and the exit status are exposed; the full text stays
+/// reachable through the error's `source`.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use std::time::Duration;
+/// use dbar::command::CommandError;
+///
+/// let summary = command_failure_category(&CommandError::Timeout {
+///     timeout: Duration::from_secs(5),
+/// });
+/// assert!(summary.starts_with("timed out"));
+/// ```
+fn command_failure_category(error: &CommandError) -> String {
+    match error {
+        CommandError::Io(_) => "the process could not be run".to_owned(),
+        CommandError::NonZero {
+            status: Some(code), ..
+        } => format!("exit status {code}"),
+        CommandError::NonZero { status: None, .. } => "terminated by a signal".to_owned(),
+        CommandError::Timeout { timeout } => format!("timed out after {timeout:?}"),
+        CommandError::OutputTooLarge { limit, stream } => {
+            format!("{stream} exceeded the {limit}-byte output limit")
+        }
+    }
+}
+
 /// Errors returned by GitHub client implementations.
 #[derive(Debug, Error)]
 pub enum GitHubError {
     /// The `gh` CLI command failed.
-    #[error("GitHub CLI command failed")]
+    #[error("GitHub CLI command failed: {}", command_failure_category(.0))]
     Command(#[from] CommandError),
 }
 
@@ -229,22 +269,61 @@ mod tests {
     }
 
     #[rstest]
-    fn pr_number_builds_the_expected_command_spec() {
+    #[case::plain_branch("feature/login")]
+    // A dash-prefixed name must survive as a positional argument rather than
+    // being parsed as a flag, which is what the `--` separator guarantees.
+    #[case::dash_prefixed_branch("-weird-branch")]
+    fn pr_number_builds_the_expected_command_spec(#[case] branch: &str) {
         let runner = StubRunner::ok("1");
         let client = GhCliClient::new(&runner);
         let project_dir = Utf8Path::new("/projects/demo");
-        let _ = client.pr_number(project_dir, "main").expect("lookup");
+        let _ = client.pr_number(project_dir, branch).expect("lookup");
 
         let seen = runner.seen.borrow();
         let spec = seen.as_ref().expect("the runner was invoked");
-        // The working directory scopes `gh` to the right repository, and the
-        // timeout keeps a stalled network call off the status path.
+        // The working directory scopes `gh` to the right repository, the
+        // positional branch overrides the current checkout, and the timeout
+        // keeps a stalled network call off the status path.
         let expected = CommandSpec::new("gh")
-            .args(["pr", "view", "--json", "number", "--jq", ".number"])
+            .args([
+                "pr", "view", "--json", "number", "--jq", ".number", "--", branch,
+            ])
             .cwd(project_dir.to_path_buf())
             .timeout(GH_TIMEOUT)
             .max_output_bytes(GH_MAX_OUTPUT_BYTES);
         assert_eq!(*spec, expected);
+    }
+
+    #[rstest]
+    #[case::non_zero(
+        CommandError::NonZero {
+            status: Some(1),
+            stderr: "gh: token ghp_supersecret is invalid".to_owned(),
+        },
+        "GitHub CLI command failed: exit status 1",
+    )]
+    #[case::signalled(
+        CommandError::NonZero { status: None, stderr: "killed".to_owned() },
+        "GitHub CLI command failed: terminated by a signal",
+    )]
+    #[case::timeout(
+        CommandError::Timeout { timeout: GH_TIMEOUT },
+        "GitHub CLI command failed: timed out after 5s",
+    )]
+    #[case::too_large(
+        CommandError::OutputTooLarge { limit: 8, stream: "stdout" },
+        "GitHub CLI command failed: stdout exceeded the 8-byte output limit",
+    )]
+    fn command_error_displays_the_failure_category(
+        #[case] source: CommandError,
+        #[case] expected: &str,
+    ) {
+        let err = GitHubError::from(source);
+        assert_eq!(err.to_string(), expected);
+        assert!(
+            !err.to_string().contains("ghp_"),
+            "captured stderr must not reach the rendered message"
+        );
     }
 
     #[rstest]
