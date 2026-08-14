@@ -25,38 +25,12 @@ const COLOUR_PR: u8 = 176;
 const COLOUR_CHIP_WARN: u8 = 221;
 const COLOUR_CHIP_DANGER: u8 = 203;
 
-/// Render a tmux status line from the collected probe data.
+/// Borrowed inputs for one status-line render.
 ///
-/// # Examples
-///
-/// ```rust,ignore
-/// use dbar::git::GitStatus;
-/// use dbar::render::RenderContext;
-/// use dbar::render::render_status_line;
-/// use dbar::tmux::TmuxContext;
-/// use dbar::types::{BranchName, ProjectName};
-/// use dbar::types::{AheadCount, BehindCount};
-///
-/// let project = ProjectName::new("demo");
-/// let git = GitStatus {
-///     branch: BranchName::new("main"),
-///     dirty: false,
-///     staged: false,
-///     ahead: AheadCount::new(0),
-///     behind: BehindCount::new(0),
-///     is_worktree: false,
-/// };
-/// let context = RenderContext {
-///     project: &project,
-///     git_status: Some(&git),
-///     pr_number: None,
-///     tmux: Some(&TmuxContext::default()),
-///     clock: None,
-///     client_width: None,
-/// };
-/// let line = render_status_line(&context);
-/// assert!(line.contains("main"));
-/// ```
+/// Every field is a snapshot already gathered by the probes: the project name,
+/// the optional git and pull-request data for the left segment, the optional
+/// tmux metadata and clock for the right segment, and the optional client width
+/// used to right-align that segment.
 pub struct RenderContext<'a> {
     /// Project name rendered in the status line.
     pub project: &'a ProjectName,
@@ -73,6 +47,52 @@ pub struct RenderContext<'a> {
 }
 
 /// Render a tmux status line from the collected probe data.
+///
+/// The left segment carries the project name, branch and pull-request chips;
+/// the right segment carries the tmux location and clock. Dynamic values are
+/// escaped so tmux renders them literally, while the renderer's own `#[...]`
+/// style tags are emitted unescaped.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use dbar::git::GitStatus;
+/// use dbar::render::{RenderContext, render_status_line};
+/// use dbar::tmux::TmuxContext;
+/// use dbar::types::{AheadCount, BehindCount, BranchName, ProjectName};
+///
+/// let project = ProjectName::new("demo");
+/// let git = GitStatus {
+///     branch: BranchName::new("main"),
+///     dirty: false,
+///     staged: false,
+///     ahead: AheadCount::new(0),
+///     behind: BehindCount::new(0),
+///     is_worktree: false,
+/// };
+/// let tmux = TmuxContext {
+///     session: Some("work".to_owned()),
+///     window: Some("1".to_owned()),
+///     pane: Some("%0".to_owned()),
+///     socket: Some("/tmp/tmux-1000/build".to_owned()),
+/// };
+/// let context = RenderContext {
+///     project: &project,
+///     git_status: Some(&git),
+///     pr_number: None,
+///     tmux: Some(&tmux),
+///     clock: Some("09:41"),
+///     client_width: None,
+/// };
+/// let line = render_status_line(&context);
+///
+/// // The project and branch open the line, the tmux location names the
+/// // non-default socket, and the clock closes it.
+/// assert!(line.contains("demo"));
+/// assert!(line.contains("main"));
+/// assert!(line.contains("work:1.%0@build"));
+/// assert!(line.ends_with(" 09:41#[default]"));
+/// ```
 pub fn render_status_line(context: &RenderContext<'_>) -> String {
     let mut parts = Vec::new();
 
@@ -209,12 +229,33 @@ fn render_worktree_indicator() -> String {
     )
 }
 
+/// Name of the socket tmux creates when no `-L`/`-S` override is given.
+const DEFAULT_SOCKET_NAME: &str = "default";
+
+/// Abbreviate a tmux socket path to the server name it identifies.
+///
+/// The status line is width-constrained, so the full path is never rendered:
+/// only the final path component is, and only when it names a server other
+/// than tmux's default one. A plain `tmux` session therefore renders exactly
+/// as before, while `tmux -L build` is distinguishable at a glance.
+fn socket_label(socket: &str) -> Option<&str> {
+    socket
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty() && *name != DEFAULT_SOCKET_NAME)
+}
+
 fn render_tmux_segment(context: &TmuxContext) -> Option<String> {
     let session = context.session.as_ref()?;
     let window = context.window.as_deref().unwrap_or("-");
     let pane = context.pane.as_deref().unwrap_or("-");
 
-    let label = escape_tmux(&format!("{session}:{window}.{pane}"));
+    let mut location = format!("{session}:{window}.{pane}");
+    if let Some(socket) = context.socket.as_deref().and_then(socket_label) {
+        location.push('@');
+        location.push_str(socket);
+    }
+    let label = escape_tmux(&location);
 
     Some(format!(
         "{}{} {}{}",
