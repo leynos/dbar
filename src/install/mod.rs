@@ -355,4 +355,6 @@ fn open_parent_for_write(path: &Utf8Path) -> Result<(Dir, &str), InstallError> {
 }
 
 #[cfg(test)]
+mod property_tests;
+#[cfg(test)]
 mod tests;
