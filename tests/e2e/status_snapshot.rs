@@ -6,6 +6,11 @@ use std::process::Command;
 use camino::Utf8PathBuf;
 use tempfile::TempDir;
 
+use super::tmux_width::visible_width;
+
+/// The value passed to `--client-width` by the full-width snapshot test.
+const CLIENT_WIDTH: usize = 80;
+
 #[test]
 fn status_snapshot_without_git() {
     let temp_dir = TempDir::new().expect("temp dir");
@@ -85,6 +90,7 @@ fn status_snapshot_clean_git_full_width_with_pr() {
         "true",
         "--github-mock-pr",
         "42",
+        // Keep this literal in step with `CLIENT_WIDTH`.
         "--client-width",
         "80",
         "--session",
@@ -97,7 +103,24 @@ fn status_snapshot_clean_git_full_width_with_pr() {
         "/tmp/tmux-demo",
     ]);
     let output = cmd.assert().success().get_output().stdout.clone();
-    let text = String::from_utf8_lossy(&output).trim_end().to_owned();
+    let raw = String::from_utf8_lossy(&output);
+
+    // The `--client-width` contract is "exactly 80" here, not "at most 80".
+    // `layout_with_width` in `src/render/mod.rs` never truncates: when the left
+    // and right segments fit it pads between them so the line fills the client
+    // width precisely, and when they do not fit it emits `left right` and
+    // overruns the width instead. This fixture fits, so the rendered line must
+    // measure exactly 80 columns. Measure the untrimmed line — trailing padding
+    // is part of the width — and count it as tmux would, ignoring `#[...]`
+    // style tags and treating `##` as one literal `#` column.
+    let rendered = raw.trim_end_matches('\n');
+    assert_eq!(
+        visible_width(rendered),
+        CLIENT_WIDTH,
+        "the rendered line must fill the requested client width exactly"
+    );
+
+    let text = raw.trim_end().to_owned();
     insta::assert_snapshot!(text);
 }
 
