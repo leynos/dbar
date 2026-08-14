@@ -30,9 +30,10 @@ from `run()` based on the parsed `DbarCommand`.
 - `tmux.rs` — `TmuxContext` and `resolve_context`, which fills in missing
   session/window/pane/socket fields by querying `tmux display-message`
   through a `&dyn CommandRunner`.
-- `cache.rs` — resolves the XDG cache directory (via `directories`) and
+- `cache/mod.rs` — resolves the XDG cache directory (via `directories`) and
   performs TTL-checked reads and atomic temp-file-then-rename writes of
-  cached PR lookups.
+  cached PR lookups, plus the bounded retention sweep described under "Cache
+  retention" below.
 - `status.rs` — `build_status_line` orchestrates a single status line: it
   resolves the project directory, probes git, looks up (and caches) the PR
   number, resolves tmux context, renders the clock label, and passes
@@ -71,6 +72,37 @@ from `run()` based on the parsed `DbarCommand`.
 5. `render::render_status_line` combines the project, git, PR, tmux, and
    clock segments into the final tmux-ready string, which `run_status` prints
    to stdout.
+
+### Cache retention
+
+Each `(project directory, branch)` pair hashes to its own
+`pr_<16 hex digits>.json` file, so entries would otherwise accumulate for
+every branch a checkout has ever had, including branches long since deleted.
+`cache/mod.rs` reclaims them under this policy:
+
+- **Trigger.** Only a read that finds an entry past its TTL sweeps the
+  directory. That path is already committed to a fresh `gh` lookup, so the
+  common cache hit — the one taken on every tmux refresh — never lists the
+  directory at all. Writes never sweep, because `store_cached_value` is given
+  no TTL to judge entries by.
+- **Bound.** One sweep lists at most 256 names, opens and parses at most 16
+  of them, and removes at most 8 files. A backlog is therefore cleared across
+  successive runs rather than in one unbounded pass on the hot path.
+- **Ownership.** The cache directory may be shared, so a file is removed only
+  when all three of these hold: its name is `pr_` followed by exactly 16
+  lowercase hex digits and `.json`; it is a regular file whose contents
+  deserialize as a cache entry; and that entry's own recorded timestamp puts
+  it past the TTL. Anything merely named like an entry — `pr_deadbeef.json`,
+  `pr_0123456789abcdef.json.tmp`, uppercase hex, or an identically named
+  directory — is left alone, as is any file whose contents do not parse.
+
+Expiry is judged from the entry's recorded timestamp rather than from file
+metadata, so an entry another dbar process has just refreshed reads as fresh.
+A file that vanishes between the listing and the removal counts as success:
+another process reclaimed it first. Any other removal failure is returned as
+`CacheError::Retention` in place of the `Ok(None)` the expiry would otherwise
+have produced, so the caller can log it and carry on with a fresh lookup
+rather than the failure being discarded silently.
 
 ## Dependency-injection seams
 
@@ -139,7 +171,8 @@ the next generation run.
 Tests are organized in three layers:
 
 1. Unit tests — `#[cfg(test)] mod tests` blocks colocated with the module
-   under test (for example `src/command.rs`, `src/cache.rs`, `src/git.rs`,
+   under test (for example `src/command.rs`, `src/cache/mod.rs` and
+   `src/cache/tests.rs`, `src/git.rs`,
    `src/tmux.rs`, `src/render/mod.rs`, `src/status.rs`,
    `src/install/mod.rs`/`src/install/tests.rs`). Cases use `#[rstest]`, with
    `#[case]` parameterization for table-style coverage and `#[fixture]` for
