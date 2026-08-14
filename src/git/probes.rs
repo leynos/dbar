@@ -190,6 +190,11 @@ pub(super) fn probe_upstream_counts(
 }
 
 /// Parse the `behind<TAB>ahead` pair emitted by `rev-list --left-right`.
+///
+/// `None` means "unparseable", which the caller turns into a
+/// [`GitProbeFailure::MalformedOutput`] carrying the raw output; nothing is
+/// discarded here, because the `ParseIntError` says no more than the raw
+/// output already does.
 fn parse_upstream_counts(stdout: &str) -> Option<(AheadCount, BehindCount)> {
     let mut parts = stdout.split_whitespace();
     let behind = parts.next()?.parse::<u32>().ok()?;

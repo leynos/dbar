@@ -165,6 +165,12 @@ impl GitStatusOutcome {
 
 /// Resolve the project name using git metadata and directory heuristics.
 ///
+/// Unlike [`git_status`], this is a chain of *heuristics*, not a chain of
+/// fallbacks after a failure: a directory with no `origin` remote (or no
+/// repository at all) is an ordinary case, and the path-derived name is the
+/// intended answer rather than a degraded one. There is nothing to report,
+/// so this function keeps its infallible signature.
+///
 /// # Examples
 ///
 /// ```rust,ignore
