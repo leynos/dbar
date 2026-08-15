@@ -7,10 +7,6 @@ use super::*;
 /// A `status` section whose values differ from the defaults and every other
 /// layer, so a test cannot pass by coincidence.
 ///
-/// `clock_format` and `pr_cache_ttl_seconds` are deliberately absent: both
-/// carry a clap `default_value_t`, so the command-line layer always supplies a
-/// value for them and no file entry can win. See
-/// `clap_defaults_shadow_configuration_file_values`, which pins that behaviour.
 const FILE_CONTENTS: &str = concat!(
     "[cmds.status]\n",
     "session = \"from-file\"\n",
@@ -161,63 +157,5 @@ fn install_configuration_file_values_are_loaded() -> Result<(), FixtureError> {
         args.path.as_deref().map(camino::Utf8Path::as_str),
         Some("/tmp/from-file.tmux.conf")
     );
-    Ok(())
-}
-
-#[rstest]
-#[expect(
-    clippy::panic_in_result_fn,
-    reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
-)]
-fn clap_defaults_shadow_configuration_file_values() -> Result<(), FixtureError> {
-    let _lock = env_lock();
-    let file = config_home(concat!(
-        "[cmds.status]\n",
-        "clock_format = \"%d %b\"\n",
-        "pr_cache_ttl_seconds = 11\n",
-    ))?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[("HOME", file.home.as_str())]);
-
-    let args = status_of(load_command_from(["dbar", "status"]).expect("status parses"));
-    // Known deviation from the documented `defaults < file < env < CLI` order:
-    // `clock_format` and `pr_cache_ttl_seconds` declare a clap `default_value_t`,
-    // so clap materializes a value even when the flag is absent and the
-    // command-line layer shadows the file. Only fields whose defaults come
-    // solely from `#[ortho_config(default = ...)]` are overridable by a file.
-    assert_eq!(args.clock_format, "%H:%M");
-    assert_eq!(args.pr_cache_ttl_seconds, CacheTtlSeconds::default());
-    Ok(())
-}
-
-#[rstest]
-#[expect(
-    clippy::panic_in_result_fn,
-    reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
-)]
-fn install_boolean_flags_are_not_settable_from_a_configuration_file() -> Result<(), FixtureError> {
-    let _lock = env_lock();
-    let file = config_home(concat!(
-        "[cmds.install]\n",
-        "dry_run = true\n",
-        "full = true\n",
-    ))?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[("HOME", file.home.as_str())]);
-
-    let args = install_of(load_command_from(["dbar", "install"]).expect("install parses"));
-    // A bare clap flag has no "absent" representation: `--dry-run` and `--full`
-    // materialize `false` when omitted, and that `false` is indistinguishable
-    // from one the user typed, so the command-line layer always shadows the
-    // file. This is the boolean case of the deviation recorded in
-    // `clap_defaults_shadow_configuration_file_values`.
-    //
-    // The alternative — declaring the fields `Option<bool>` so absence is
-    // representable — makes clap demand a value (`--full <FULL>`), which would
-    // break `dbar install --full`. Preserving the flag spelling is worth more
-    // than file-sourced booleans, so the limitation is asserted here rather
-    // than worked around, and is documented in the users' guide.
-    assert!(!args.dry_run, "a file cannot enable a bare clap flag");
-    assert!(!args.full, "a file cannot enable a bare clap flag");
     Ok(())
 }

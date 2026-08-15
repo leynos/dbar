@@ -97,30 +97,40 @@ client_width = 120
 
 [cmds.install]
 position = "right"
+dry_run = false
+full = true
 ```
 
-### Settings a configuration file cannot control
+### Boolean settings
 
-Two groups of settings do not follow the precedence above, because clap
-supplies a value even when the corresponding flag is omitted, and that value
-is indistinguishable from one a user typed on the command line:
+`install`'s `--dry-run` and `--full` are bare flags that take no value, yet
+they follow the same precedence as every other setting. Absence of a flag is
+distinct from `false`: an omitted flag contributes nothing to the merge, so a
+configuration file or a `DBAR_*` variable decides, and a flag that is typed
+wins over both.
 
-- `install`'s `--dry-run` and `--full` flags are plain boolean flags. Clap
-  materializes `false` for either one whenever it is absent, so the
-  command-line layer always shadows a configuration file's `dry_run` or
-  `full` setting. Declaring these as optional flags instead would make clap
-  demand a value (`--full <VALUE>`), breaking the existing flag spelling, so
-  this limitation is deliberate rather than an oversight.
-- `status`'s `clock_format` and `pr_cache_ttl_seconds` declare a clap
-  default, so clap likewise materializes that default whenever the flag is
-  absent, and a configuration file's value for either setting is shadowed the
-  same way. Only settings whose defaults come solely from the configuration
-  layer (not from a clap default) can be overridden by a configuration file.
+```toml
+[cmds.install]
+dry_run = true
+full = true
+```
 
-Any of these five settings can still be controlled from a configuration file
-indirectly by pairing it with the matching `DBAR_*` environment variable
-(for example `DBAR_CMDS_INSTALL_FULL=true`), since environment variables are
-read by the same shell session and are not subject to this limitation.
+The same values can be supplied as `DBAR_CMDS_INSTALL_DRY_RUN=true` and
+`DBAR_CMDS_INSTALL_FULL=true`, which override the file.
+
+One asymmetry remains, and it is a property of the flag spelling rather than of
+the merge: because `--dry-run` and `--full` accept no value, the command line
+can turn a setting on but cannot turn one off. A configuration file that sets
+`dry_run = true` is therefore overridden by setting
+`DBAR_CMDS_INSTALL_DRY_RUN=false`, not from the command line.
+
+### Invalid values
+
+A malformed value in a configuration file or an environment variable is
+reported as a merge failure naming the offending setting, and dbar exits
+without rendering or installing anything. A malformed command-line argument is
+reported by clap in the usual way. Neither case falls back to a default
+silently.
 
 ## Diagnostics
 

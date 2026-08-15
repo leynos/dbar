@@ -116,7 +116,13 @@ in tmux via `#(dbar)` and all specified tests pass.
 - Observation: the CLI treated `pr_cache_ttl_seconds` as required after adding
   explicit long flags. Evidence: e2e tests failed with a missing
   `--pr-cache-ttl-seconds` error. Impact: set a clap default value for the
-  field.
+  field. Superseded: a clap default materializes a value even when the flag is
+  absent, so the command-line layer shadowed the configuration file and the
+  environment. The field is now `Option<CacheTtlSeconds>` with no clap default,
+  as are `clock_format`, `dry_run`, and `full`; the documented defaults are
+  applied after merging by accessors on `StatusArgs` and `InstallArgs`.
+  `#[ortho_config(default = ...)]` was found not to populate an `Option` field,
+  so it is not an alternative.
 
 - Observation: rebasing onto `origin/main` applied two new commits
   (`dependabot-automerge` rollout and the cooldown fix), neither of which

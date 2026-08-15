@@ -10,9 +10,20 @@ fn documented_defaults_apply_when_nothing_overrides_them() {
     let _env = EnvGuard::set(&ISOLATING);
 
     let args = status_of(load_command_from(["dbar", "status"]).expect("bare status parses"));
-    assert_eq!(args.clock_format, "%H:%M");
-    assert_eq!(args.pr_cache_ttl_seconds, CacheTtlSeconds::default());
+    // Nothing was supplied, so every field stays absent and the documented
+    // defaults come from the accessors rather than from clap. An absent field
+    // is what lets a lower layer decide, so both halves are asserted.
+    assert_eq!(args.clock_format, None);
+    assert_eq!(args.pr_cache_ttl_seconds, None);
+    assert_eq!(args.clock_format_or_default(), "%H:%M");
+    assert_eq!(args.pr_cache_ttl_or_default(), CacheTtlSeconds::default());
     assert_eq!(args.show_pr, None);
+
+    let install = install_of(load_command_from(["dbar", "install"]).expect("bare install parses"));
+    assert_eq!(install.dry_run, None);
+    assert_eq!(install.full, None);
+    assert!(!install.is_dry_run());
+    assert!(!install.is_full());
 }
 
 #[rstest]
@@ -36,8 +47,11 @@ fn command_line_values_are_applied() {
         .expect("status arguments parse"),
     );
     assert_eq!(args.session.as_deref(), Some("demo"));
-    assert_eq!(args.clock_format, "%H");
-    assert_eq!(args.pr_cache_ttl_seconds.value(), 5);
+    assert_eq!(args.clock_format.as_deref(), Some("%H"));
+    assert_eq!(
+        args.pr_cache_ttl_seconds.map(CacheTtlSeconds::value),
+        Some(5)
+    );
     assert_eq!(args.show_pr, Some(false));
 }
 
@@ -52,7 +66,10 @@ fn install_arguments_are_applied() {
         panic!("expected the install subcommand");
     };
     assert_eq!(args.position, Some(StatusPosition::Right));
-    assert!(args.full);
+    assert_eq!(args.full, Some(true));
+    // The flag that was *not* typed must stay absent rather than arriving as
+    // `Some(false)`, which is what would shadow the lower layers.
+    assert_eq!(args.dry_run, None);
 }
 
 #[rstest]

@@ -85,7 +85,7 @@ fn cache_root() -> io::Result<TempDir> {
 fn args_with_cache(cache_dir: &Utf8Path) -> StatusArgs {
     StatusArgs {
         cache_dir: Some(cache_dir.to_path_buf()),
-        pr_cache_ttl_seconds: CacheTtlSeconds::new(60),
+        pr_cache_ttl_seconds: Some(CacheTtlSeconds::new(60)),
         ..StatusArgs::default()
     }
 }

@@ -208,7 +208,10 @@ fn resolve_pr_number(context: &PrLookup<'_>) -> PrLookupReport {
 
 /// Consult the cache, then fall through to a lookup if it did not answer.
 fn resolve_with_cache(context: &PrLookup<'_>, path: &Utf8Path) -> PrLookupReport {
-    match cache::load_cached_value(path, context.clock, context.args.pr_cache_ttl_seconds) {
+    // Absent when no layer set a TTL, so the documented default is applied
+    // after merging; a clap default would shadow the lower layers.
+    let ttl = context.args.pr_cache_ttl_or_default();
+    match cache::load_cached_value(path, context.clock, ttl) {
         Ok(Some(value)) => PrLookupReport {
             pr_number: pr::pr_from_cache_entry(value),
             cache: CacheOutcome::Hit,

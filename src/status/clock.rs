@@ -38,13 +38,16 @@ pub fn render_clock(args: &StatusArgs, clock: &dyn Clock) -> Result<Option<Strin
     // `DelayedFormat::fmt` returns an error for invalid strftime directives, so
     // render via `write!` and surface that as a typed error rather than letting
     // `ToString::to_string` panic on a user-supplied `clock_format`.
+    // The merged arguments leave `clock_format` absent when no layer set it,
+    // so the documented default is applied after merging rather than by clap.
+    let format = args.clock_format_or_default();
     let mut label = String::new();
-    write!(label, "{}", clock.local().format(&args.clock_format)).map_err(|_| {
+    write!(label, "{}", clock.local().format(format)).map_err(|_| {
         io::Error::new(
             ErrorKind::InvalidInput,
             // Naming the offending value makes the failure actionable; no
             // other configuration is disclosed.
-            format!("invalid clock_format {:?}", args.clock_format),
+            format!("invalid clock_format {format:?}"),
         )
     })?;
     Ok(Some(label))
@@ -65,7 +68,7 @@ mod tests {
     fn invalid_clock_format_returns_an_actionable_error(#[case] clock_format: &str) {
         let args = StatusArgs {
             show_clock: Some(true),
-            clock_format: clock_format.to_owned(),
+            clock_format: Some(clock_format.to_owned()),
             ..StatusArgs::default()
         };
         let clock = DefaultClock;
@@ -79,7 +82,7 @@ mod tests {
     fn valid_clock_format_renders() {
         let args = StatusArgs {
             show_clock: Some(true),
-            clock_format: "%H:%M".to_owned(),
+            clock_format: Some("%H:%M".to_owned()),
             ..StatusArgs::default()
         };
         let clock = DefaultClock;

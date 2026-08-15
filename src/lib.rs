@@ -9,6 +9,8 @@ mod github;
 mod install;
 mod render;
 mod status;
+#[cfg(test)]
+mod test_support;
 mod tmux;
 mod types;
 
@@ -82,11 +84,16 @@ fn report_diagnostics(diagnostics: &status::StatusDiagnostics) {
 
 /// Install the tmux snippet and report the outcome to stdout.
 fn run_install(args: config::InstallArgs) -> Result<(), DbarError> {
+    // Both flags are tri-state so that an omitted flag cannot shadow the
+    // environment or the configuration file; absence means the documented
+    // default of `false`. Read before `path` is moved out of `args`.
+    let dry_run = args.is_dry_run();
+    let full = args.is_full();
+    let position = args.position.unwrap_or_default();
     let path = args
         .path
         .or_else(|| Some(config::default_tmux_config_path()));
-    let position = args.position.unwrap_or_default();
-    let outcome = install::install(path, position, args.dry_run, args.full)?;
+    let outcome = install::install(path, position, dry_run, full)?;
     report_install_outcome(&outcome);
     Ok(())
 }

@@ -1,4 +1,35 @@
 //! Configuration and CLI parsing for dbar.
+//!
+//! # Why every field is optional
+//!
+//! Values are resolved from four layers, in ascending priority: the documented
+//! defaults, the configuration file, the environment, and the command line.
+//! `ortho_config` implements that order by serializing the parsed CLI struct
+//! and skipping `None`, so a field the operator did not supply simply does not
+//! appear in the top layer and the layers beneath it decide.
+//!
+//! A clap `default_value_t`, or a bare `bool` flag, breaks this: clap
+//! materializes a value whether or not the flag was given, and that value is
+//! indistinguishable from one the operator typed, so the command-line layer
+//! shadows the environment and the configuration file. Every field is
+//! therefore `Option<T>` with no clap default.
+//!
+//! # Where the documented defaults live
+//!
+//! `#[ortho_config(default = ...)]` does not populate an `Option` field: a bare
+//! `dbar install` merges to `path: None` and `position: None` even though both
+//! carried one, which is why [`crate::run`] has always had to fall back for
+//! them by hand. The defaults are therefore applied after merging, by
+//! [`StatusArgs::clock_format_or_default`],
+//! [`StatusArgs::pr_cache_ttl_or_default`], [`InstallArgs::is_dry_run`], and
+//! [`InstallArgs::is_full`], so that each one has a single home that consumers
+//! and tests can both name.
+//!
+//! Booleans keep their bare-flag spelling through `num_args = 0` with
+//! `default_missing_value = "true"`: `--dry-run` still takes no value, an
+//! omitted flag yields `None` rather than `Some(false)`, and only a flag the
+//! operator actually typed reaches the merge. `ArgAction::SetTrue` cannot be
+//! used, because it yields `Some(false)` for an absent flag.
 
 use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
@@ -62,19 +93,55 @@ pub struct StatusArgs {
     #[arg(long)]
     pub show_clock: Option<bool>,
     /// Clock format string, using chrono strftime syntax.
-    #[ortho_config(default = default_clock_format())]
-    #[arg(long, default_value_t = default_clock_format())]
-    pub clock_format: String,
+    // Optional so an omitted flag cannot shadow the lower layers; consumers
+    // apply `DEFAULT_CLOCK_FORMAT`. See the module documentation.
+    #[arg(long)]
+    pub clock_format: Option<String>,
     /// Mock PR number for GitHub lookups (used in tests).
     #[arg(long)]
     pub github_mock_pr: Option<String>,
     /// Cache TTL for PR lookups, in seconds.
-    #[ortho_config(default = CacheTtlSeconds::default())]
-    #[arg(long, default_value_t = CacheTtlSeconds::default())]
-    pub pr_cache_ttl_seconds: CacheTtlSeconds,
+    // Optional for the same reason as `clock_format`; consumers fall back to
+    // `CacheTtlSeconds::default`.
+    #[arg(long)]
+    pub pr_cache_ttl_seconds: Option<CacheTtlSeconds>,
     /// Override the cache directory used for PR lookups.
     #[arg(long)]
     pub cache_dir: Option<Utf8PathBuf>,
+}
+
+impl StatusArgs {
+    /// The clock format to render with, or [`DEFAULT_CLOCK_FORMAT`] if no
+    /// layer supplied one.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use dbar::config::StatusArgs;
+    ///
+    /// assert_eq!(StatusArgs::default().clock_format_or_default(), "%H:%M");
+    /// ```
+    #[must_use]
+    pub fn clock_format_or_default(&self) -> &str {
+        self.clock_format.as_deref().unwrap_or(DEFAULT_CLOCK_FORMAT)
+    }
+
+    /// The PR cache TTL, or [`CacheTtlSeconds::default`] if no layer supplied
+    /// one.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use dbar::config::StatusArgs;
+    /// use dbar::types::CacheTtlSeconds;
+    ///
+    /// let ttl = StatusArgs::default().pr_cache_ttl_or_default();
+    /// assert_eq!(ttl, CacheTtlSeconds::default());
+    /// ```
+    #[must_use]
+    pub fn pr_cache_ttl_or_default(&self) -> CacheTtlSeconds {
+        self.pr_cache_ttl_seconds.unwrap_or_default()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, OrthoConfig, Default, Parser)]
@@ -83,21 +150,56 @@ pub struct StatusArgs {
 /// Arguments for installing tmux configuration.
 pub struct InstallArgs {
     /// Path to the tmux configuration file to edit.
-    #[ortho_config(default = default_tmux_config_path())]
+    // No `#[ortho_config(default = ...)]`: it does not populate an `Option`
+    // field, so `crate::run` applies `default_tmux_config_path` after merging.
     #[arg(long)]
     pub path: Option<Utf8PathBuf>,
     /// Emit the snippet without writing it.
-    #[ortho_config(default = false)]
-    #[arg(long)]
-    pub dry_run: bool,
+    // A bare flag that accepts no value, yet distinguishes "absent" from
+    // "false". See the module documentation.
+    #[arg(long, num_args = 0, default_missing_value = "true")]
+    pub dry_run: Option<bool>,
     /// Install the full-width snippet with client width support.
-    #[ortho_config(default = false)]
-    #[arg(long)]
-    pub full: bool,
+    // Tri-state for the same reason as `dry_run`.
+    #[arg(long, num_args = 0, default_missing_value = "true")]
+    pub full: Option<bool>,
     /// Where to install the status segment (left or right).
-    #[ortho_config(default = StatusPosition::Left)]
+    // Defaulted after merging, as for `path`.
     #[arg(long)]
     pub position: Option<StatusPosition>,
+}
+
+impl InstallArgs {
+    /// Whether the snippet should be emitted without being written.
+    ///
+    /// Absence means the documented default of `false`; an explicit
+    /// `dry_run = false` in a lower layer means the same thing.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use dbar::config::InstallArgs;
+    ///
+    /// assert!(!InstallArgs::default().is_dry_run());
+    /// ```
+    #[must_use]
+    pub const fn is_dry_run(&self) -> bool {
+        matches!(self.dry_run, Some(true))
+    }
+
+    /// Whether the full-width snippet should be installed.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use dbar::config::InstallArgs;
+    ///
+    /// assert!(!InstallArgs::default().is_full());
+    /// ```
+    #[must_use]
+    pub const fn is_full(&self) -> bool {
+        matches!(self.full, Some(true))
+    }
 }
 
 pub(crate) fn default_tmux_config_path() -> Utf8PathBuf {
@@ -109,9 +211,12 @@ pub(crate) fn default_tmux_config_path() -> Utf8PathBuf {
     Utf8PathBuf::from_path_buf(path).unwrap_or(fallback)
 }
 
-fn default_clock_format() -> String {
-    "%H:%M".to_owned()
-}
+/// The clock format applied when no layer supplies one.
+///
+/// Held here rather than on the clap attribute so that an omitted
+/// `--clock-format` cannot shadow the environment or the configuration file;
+/// [`crate::status::clock`] applies it after merging.
+pub(crate) const DEFAULT_CLOCK_FORMAT: &str = "%H:%M";
 
 /// The merged command selected by the CLI.
 #[derive(Debug)]

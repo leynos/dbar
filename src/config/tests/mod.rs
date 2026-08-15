@@ -1,10 +1,13 @@
-//! Shared harness for the configuration tests, split across [`arguments`] and
-//! [`files`].
+//! Shared harness for the configuration tests, split across [`arguments`],
+//! [`files`], and [`precedence`].
 //!
 //! `ortho_config` reads `DBAR_*` variables and configuration files from the
-//! ambient environment, so environment-dependent cases serialize on a shared
-//! lock and restore every variable they touch. Argument-only cases still take
-//! the lock, because a stray `DBAR_*` value would otherwise perturb them.
+//! ambient environment and offers no way to inject a substitute, so these cases
+//! mutate the real environment through [`crate::test_support`], which serializes
+//! them on one crate-wide lock and restores every variable they touch.
+//! [`crate::test_support`] records why injection is not available. Argument-only
+//! cases take the lock as well, because a stray `DBAR_*` value would otherwise
+//! perturb them.
 //!
 //! Note that subcommand merging does *not* honour `DBAR_CONFIG_PATH`:
 //! `ortho_config` builds its candidate list from `$HOME/.dbar.toml`, the XDG
@@ -13,54 +16,14 @@
 //! configuration file.
 mod arguments;
 mod files;
+mod precedence;
 
 use super::*;
+use crate::test_support::{EnvGuard, env_lock};
 use cap_std::ambient_authority;
 use cap_std::fs_utf8::Dir;
 use rstest::rstest;
-use std::ffi::OsString;
-use std::sync::{Mutex, MutexGuard, OnceLock};
 use tempfile::TempDir;
-
-/// Serializes every test that touches process-wide environment state.
-fn env_lock() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// Restores the variables it captured when dropped.
-struct EnvGuard {
-    saved: Vec<(String, Option<OsString>)>,
-}
-
-impl EnvGuard {
-    fn set(pairs: &[(&str, &str)]) -> Self {
-        let saved = pairs
-            .iter()
-            .map(|(key, _)| ((*key).to_owned(), std::env::var_os(key)))
-            .collect();
-        for (key, value) in pairs {
-            // SAFETY: `env_lock` serializes every mutation in this module and
-            // the guard restores the previous value on drop.
-            unsafe { std::env::set_var(key, value) };
-        }
-        Self { saved }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        for (key, value) in &self.saved {
-            // SAFETY: as above; the lock is still held by the test.
-            match value {
-                Some(previous) => unsafe { std::env::set_var(key, previous) },
-                None => unsafe { std::env::remove_var(key) },
-            }
-        }
-    }
-}
 
 /// Variables that would otherwise leak real user configuration into a test.
 ///
