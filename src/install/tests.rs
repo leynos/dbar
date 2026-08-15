@@ -17,12 +17,8 @@ fn workspace() -> Workspace {
 }
 
 #[rstest]
-#[expect(
-    clippy::panic_in_result_fn,
-    reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
-)]
-fn install_writes_snippet(workspace: Workspace) -> Result<(), InstallError> {
-    let (_temp_dir, path) = workspace?;
+fn install_writes_snippet(workspace: Workspace) {
+    let (_temp_dir, path) = workspace.expect("workspace");
     let initial = "set -g status on\n";
     write(&path, initial).expect("write config");
 
@@ -34,69 +30,44 @@ fn install_writes_snippet(workspace: Workspace) -> Result<(), InstallError> {
     let contents = read_to_string(&path).expect("read config");
     assert!(contents.contains(MARKER_START));
     assert!(contents.contains(MARKER_END));
-    Ok(())
 }
 
 #[rstest]
-#[expect(
-    clippy::panic_in_result_fn,
-    reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
-)]
-fn install_is_idempotent(workspace: Workspace) -> Result<(), InstallError> {
-    let (_temp_dir, path) = workspace?;
+fn install_is_idempotent(workspace: Workspace) {
+    let (_temp_dir, path) = workspace.expect("workspace");
     let _ =
         install(Some(path.clone()), StatusPosition::Right, false, false).expect("install snippet");
     let second =
         install(Some(path.clone()), StatusPosition::Right, false, false).expect("install snippet");
     assert!(!second.updated);
-    Ok(())
 }
 
 #[rstest]
-#[expect(
-    clippy::panic_in_result_fn,
-    reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
-)]
-fn install_full_adds_client_width(workspace: Workspace) -> Result<(), InstallError> {
-    let (_temp_dir, path) = workspace?;
+fn install_full_adds_client_width(workspace: Workspace) {
+    let (_temp_dir, path) = workspace.expect("workspace");
     let outcome = install(Some(path), StatusPosition::Left, true, true).expect("install snippet");
     assert!(outcome.snippet.contains("--client-width #{q:client_width}"));
     assert!(outcome.snippet.contains("status-left-length 999"));
-    Ok(())
 }
 
 #[rstest]
-#[expect(
-    clippy::panic_in_result_fn,
-    reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
-)]
-fn install_right_enables_clock(workspace: Workspace) -> Result<(), InstallError> {
-    let (_temp_dir, path) = workspace?;
+fn install_right_enables_clock(workspace: Workspace) {
+    let (_temp_dir, path) = workspace.expect("workspace");
     let outcome = install(Some(path), StatusPosition::Right, true, false).expect("install snippet");
     assert!(outcome.snippet.contains("--show-clock true"));
     assert!(outcome.snippet.contains("status-right"));
-    Ok(())
 }
 
 #[rstest]
-#[expect(
-    clippy::panic_in_result_fn,
-    reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
-)]
-fn install_left_omits_clock(workspace: Workspace) -> Result<(), InstallError> {
-    let (_temp_dir, path) = workspace?;
+fn install_left_omits_clock(workspace: Workspace) {
+    let (_temp_dir, path) = workspace.expect("workspace");
     let outcome = install(Some(path), StatusPosition::Left, true, false).expect("install snippet");
     assert!(!outcome.snippet.contains("--show-clock true"));
-    Ok(())
 }
 
 #[rstest]
-#[expect(
-    clippy::panic_in_result_fn,
-    reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
-)]
-fn install_dry_run_leaves_missing_parent_absent(workspace: Workspace) -> Result<(), InstallError> {
-    let (temp_dir, _) = workspace?;
+fn install_dry_run_leaves_missing_parent_absent(workspace: Workspace) {
+    let (temp_dir, _) = workspace.expect("workspace");
     let missing_parent =
         Utf8PathBuf::from_path_buf(temp_dir.path().join("missing")).expect("missing parent path");
     let config = missing_parent.join("tmux.conf");
@@ -105,19 +76,14 @@ fn install_dry_run_leaves_missing_parent_absent(workspace: Workspace) -> Result<
     assert!(outcome.dry_run);
     // The parent directory must not have been created by the dry run.
     assert!(Dir::open_ambient_dir(missing_parent.as_path(), ambient_authority()).is_err());
-    Ok(())
 }
 
 #[rstest]
 #[cfg(unix)]
-#[expect(
-    clippy::panic_in_result_fn,
-    reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
-)]
-fn install_preserves_restrictive_permissions(workspace: Workspace) -> Result<(), InstallError> {
+fn install_preserves_restrictive_permissions(workspace: Workspace) {
     use cap_std::fs_utf8::{Permissions, PermissionsExt as _};
 
-    let (_temp_dir, path) = workspace?;
+    let (_temp_dir, path) = workspace.expect("workspace");
     write(&path, "set -g status on\n").expect("write config");
 
     let (dir, file_name) = open_parent_for_read(&path).expect("open parent");
@@ -150,7 +116,6 @@ fn install_preserves_restrictive_permissions(workspace: Workspace) -> Result<(),
         backup_mode, 0o600,
         "the backup must inherit the config's permissions"
     );
-    Ok(())
 }
 
 /// Two simultaneous installs must serialize, leaving one well-formed block.
@@ -162,14 +127,8 @@ fn install_preserves_restrictive_permissions(workspace: Workspace) -> Result<(),
 /// intact, and a file that is a single valid block rather than an interleaved
 /// mixture of two runs.
 #[rstest]
-#[expect(
-    clippy::panic_in_result_fn,
-    reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
-)]
-fn concurrent_installs_leave_one_well_formed_block(
-    workspace: Workspace,
-) -> Result<(), InstallError> {
-    let (_temp_dir, path) = workspace?;
+fn concurrent_installs_leave_one_well_formed_block(workspace: Workspace) {
+    let (_temp_dir, path) = workspace.expect("workspace");
     let unrelated = "# unrelated\nset -g mouse on\n";
     write(&path, unrelated).expect("seed config");
 
@@ -233,7 +192,6 @@ fn concurrent_installs_leave_one_well_formed_block(
         !repeat.updated,
         "the winning snippet must already be installed verbatim: {contents}"
     );
-    Ok(())
 }
 
 #[rstest]
@@ -243,18 +201,13 @@ fn install_without_path_reports_missing_path() {
 }
 
 #[rstest]
-#[expect(
-    clippy::panic_in_result_fn,
-    reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
-)]
-fn install_reports_incomplete_markers(workspace: Workspace) -> Result<(), InstallError> {
-    let (_temp_dir, path) = workspace?;
+fn install_reports_incomplete_markers(workspace: Workspace) {
+    let (_temp_dir, path) = workspace.expect("workspace");
     // A start marker with no matching end marker must not be rewritten.
     write(&path, &format!("{MARKER_START}\nset -g status-left ''\n")).expect("seed config");
     let err =
         install(Some(path), StatusPosition::Left, true, false).expect_err("dangling start marker");
     assert!(matches!(err, InstallError::IncompleteMarkers));
-    Ok(())
 }
 
 #[rstest]
