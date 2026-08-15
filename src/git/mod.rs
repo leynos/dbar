@@ -261,7 +261,10 @@ fn name_from_worktree_path(path: &Utf8Path) -> Option<ProjectName> {
     let value = path.as_str();
     let marker = ".worktrees";
     let (before, _) = value.split_once(marker)?;
-    let name = before.rsplit('/').next()?;
+    // `project/.worktrees/branch` leaves `before` as `project/`, whose last
+    // `/`-separated segment is empty; trim the separator so the project name is
+    // the directory that contains the marker.
+    let name = before.trim_end_matches('/').rsplit('/').next()?;
     if name.is_empty() {
         None
     } else {

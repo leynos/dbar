@@ -66,23 +66,45 @@ impl<'a> GhCliClient<'a> {
     }
 }
 
+/// Build the `gh pr list` arguments that resolve the open PR for `branch`.
+///
+/// `--head=<branch>` keeps a dash-prefixed branch name attached to its flag:
+/// passed as a separate argument it would be parsed as a flag of its own, and a
+/// `--` separator cannot protect a flag *value*. The jq expression collapses an
+/// empty result array to an empty string, so "no open PR" reaches the caller as
+/// empty stdout rather than as a command failure.
+fn pr_list_args(branch: &str) -> [String; 11] {
+    [
+        "pr".to_owned(),
+        "list".to_owned(),
+        format!("--head={branch}"),
+        "--state".to_owned(),
+        "open".to_owned(),
+        "--limit".to_owned(),
+        "1".to_owned(),
+        "--json".to_owned(),
+        "number".to_owned(),
+        "--jq".to_owned(),
+        r#".[0].number // """#.to_owned(),
+    ]
+}
+
 impl GitHubClient for GhCliClient<'_> {
     fn pr_number(
         &self,
         project_dir: &Utf8Path,
         branch: &str,
     ) -> Result<Option<PrNumber>, GitHubError> {
-        // `gh pr view` resolves the current checkout when given no positional
-        // argument, which is the wrong PR whenever the caller asks about a
-        // branch other than the one checked out. The `--` separator keeps a
-        // branch name that begins with a dash from being parsed as a flag.
+        // `gh pr view <branch>` exits non-zero when the branch has no open PR,
+        // which would turn "no PR" into a command failure and defeat the
+        // negative cache. `gh pr list` with an exporter (`--json`) suppresses
+        // the no-results error and prints an empty array instead, so the absent
+        // case arrives as empty stdout and exit status zero.
         let output = self
             .runner
             .run(
                 &CommandSpec::new("gh")
-                    .args([
-                        "pr", "view", "--json", "number", "--jq", ".number", "--", branch,
-                    ])
+                    .args(pr_list_args(branch))
                     .cwd(project_dir.to_path_buf())
                     .timeout(GH_TIMEOUT)
                     .max_output_bytes(GH_MAX_OUTPUT_BYTES),
@@ -191,12 +213,25 @@ mod tests {
 
     /// The spec `pr_number` is expected to build for `branch`.
     fn expected_spec(project_dir: &Utf8Path, branch: &str) -> CommandSpec {
-        // The working directory scopes `gh` to the right repository, the
-        // positional branch overrides the current checkout, and the timeout
-        // keeps a stalled network call off the status path.
+        // The working directory scopes `gh` to the right repository, `--head`
+        // overrides the current checkout, `--json` suppresses the no-results
+        // error so an absent PR is not a failure, and the timeout keeps a
+        // stalled network call off the status path. Spelled out rather than
+        // reusing `pr_list_args`, so a change to the real command has to be
+        // restated here deliberately.
         CommandSpec::new("gh")
             .args([
-                "pr", "view", "--json", "number", "--jq", ".number", "--", branch,
+                "pr".to_owned(),
+                "list".to_owned(),
+                format!("--head={branch}"),
+                "--state".to_owned(),
+                "open".to_owned(),
+                "--limit".to_owned(),
+                "1".to_owned(),
+                "--json".to_owned(),
+                "number".to_owned(),
+                "--jq".to_owned(),
+                r#".[0].number // """#.to_owned(),
             ])
             .cwd(project_dir.to_path_buf())
             .timeout(GH_TIMEOUT)
@@ -254,7 +289,7 @@ mod tests {
             .returning(|_| {
                 Err(CommandError::NonZero {
                     status: Some(1),
-                    stderr: "no pull requests found".to_owned(),
+                    stderr: "could not determine the current repository".to_owned(),
                 })
             });
         let client = GhCliClient::new(&runner);
@@ -265,13 +300,14 @@ mod tests {
             panic!("expected a propagated non-zero command error");
         };
         assert_eq!(status, Some(1));
-        assert_eq!(stderr, "no pull requests found");
+        assert_eq!(stderr, "could not determine the current repository");
     }
 
     #[rstest]
     #[case::plain_branch("feature/login")]
-    // A dash-prefixed name must survive as a positional argument rather than
-    // being parsed as a flag, which is what the `--` separator guarantees.
+    // A dash-prefixed name must reach `gh` as the value of `--head` rather than
+    // being parsed as a flag, which is what the `--head=<branch>` form
+    // guarantees.
     #[case::dash_prefixed_branch("-weird-branch")]
     fn pr_number_builds_the_expected_command_spec(#[case] branch: &str) {
         let project_dir = Utf8Path::new(PROJECT_DIR);

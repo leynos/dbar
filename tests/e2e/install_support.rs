@@ -4,6 +4,16 @@
 //! behaviour in `install_cli` and the multi-process race in
 //! `install_concurrency` — but both seed the same shaped configuration file and
 //! inspect the same sibling paths, so those pieces live here.
+//!
+//! [`MARKER_START`], [`MARKER_END`], [`backup_path`] and [`lock_path`] restate
+//! the production values rather than importing them, and must keep doing so.
+//! These are the names `dbar install` writes into a user's `tmux.conf` and the
+//! sibling files it leaves beside it, so they are part of the tool's contract
+//! with configurations installed by earlier releases. Importing them from the
+//! crate would make these tests agree with whatever the code currently says:
+//! renaming a marker or a suffix would silently keep passing, and every
+//! existing installation would be orphaned without a single failing test.
+//! Spelling them out here means such a rename has to be made twice, on purpose.
 
 use std::io;
 

@@ -6,11 +6,10 @@
 //! actionable message instead of quietly rendering nothing.
 
 use std::fmt::Write as _;
-use std::io::{self, ErrorKind};
 
 use mockable::Clock;
 
-use crate::config::StatusArgs;
+use crate::config::{ConfigError, StatusArgs};
 use crate::error::DbarError;
 
 /// Render the clock label, if the clock segment is enabled.
@@ -42,14 +41,10 @@ pub fn render_clock(args: &StatusArgs, clock: &dyn Clock) -> Result<Option<Strin
     // so the documented default is applied after merging rather than by clap.
     let format = args.clock_format_or_default();
     let mut label = String::new();
-    write!(label, "{}", clock.local().format(format)).map_err(|_| {
-        io::Error::new(
-            ErrorKind::InvalidInput,
-            // Naming the offending value makes the failure actionable; no
-            // other configuration is disclosed.
-            format!("invalid clock_format {format:?}"),
-        )
-    })?;
+    // An unrenderable format is a configuration fault, so it is reported as
+    // one; `ConfigError::InvalidClockFormat` names the offending value.
+    write!(label, "{}", clock.local().format(format))
+        .map_err(|_| ConfigError::InvalidClockFormat(format.to_owned()))?;
     Ok(Some(label))
 }
 
@@ -59,8 +54,25 @@ mod tests {
     //! an invalid `clock_format`.
 
     use super::*;
-    use mockable::DefaultClock;
+    use mockable::{DefaultClock, MockClock};
     use rstest::rstest;
+
+    /// A fixed instant carrying an explicit offset, so the parse is unambiguous
+    /// wherever the suite runs.
+    ///
+    /// Parsed rather than constructed, so the test needs no direct dependency
+    /// on chrono: the target type is inferred from [`Clock::local`]'s return
+    /// type by way of the closure handed to `returning`.
+    const FIXED_INSTANT: &str = "2026-08-15T13:45:30+00:00";
+
+    /// The hour and minute of an instant, taken from its `NaiveTime` display
+    /// rather than from strftime.
+    ///
+    /// Deriving the expected label through a different formatter is what keeps
+    /// the assertion below from merely re-running the code under test.
+    fn hour_and_minute(rendered_time: &str) -> String {
+        rendered_time.chars().take(5).collect()
+    }
 
     #[rstest]
     #[case::dangling_percent("%")]
@@ -79,15 +91,32 @@ mod tests {
     }
 
     #[rstest]
-    fn valid_clock_format_renders() {
+    fn the_label_is_the_injected_clock_rendered_through_the_configured_format() {
+        let fixed = FIXED_INSTANT.parse().expect("fixed instant parses");
+        let mut clock = MockClock::new();
+        // `times(1)` is what rules out a second time source: a `render_clock`
+        // that reached for `Local::now()` would leave the injected clock
+        // unconsulted and fail the expectation. `returning` rather than
+        // `return_const`, because the closure's return type is what pins
+        // `fixed` to the trait's `DateTime<Local>`.
+        clock.expect_local().times(1).returning(move || fixed);
+
+        // Literal text either side of the directives, so a `render_clock` that
+        // ignored `clock_format` and hardcoded one could not produce this
+        // label, and so the assertion is an exact equality rather than a check
+        // that the output merely contains a colon.
         let args = StatusArgs {
             show_clock: Some(true),
-            clock_format: Some("%H:%M".to_owned()),
+            clock_format: Some("at %H:%M sharp".to_owned()),
             ..StatusArgs::default()
         };
-        let clock = DefaultClock;
+
         let label = render_clock(&args, &clock).expect("valid format renders");
-        assert!(label.is_some_and(|value| value.contains(':')));
+
+        // The local offset is applied to both sides alike, so this holds in
+        // any timezone the suite runs in.
+        let expected = format!("at {} sharp", hour_and_minute(&fixed.time().to_string()));
+        assert_eq!(label.as_deref(), Some(expected.as_str()));
     }
 
     #[rstest]

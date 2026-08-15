@@ -26,10 +26,8 @@ const INSTALL_FILE: &str = concat!("[cmds.install]\n", "dry_run = true\n", "full
     reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
 )]
 fn the_configuration_file_overrides_the_status_defaults() -> Result<(), FixtureError> {
-    let _lock = env_lock();
     let file = config_home(STATUS_FILE)?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[("HOME", file.home.as_str())]);
+    let _env = EnvGuard::set(&ISOLATING).and(&[("HOME", file.home.as_str())]);
 
     let args = status_of(load_command_from(["dbar", "status"]).expect("status parses"));
     assert_eq!(args.clock_format_or_default(), "%d %b");
@@ -44,10 +42,8 @@ fn the_configuration_file_overrides_the_status_defaults() -> Result<(), FixtureE
 )]
 fn the_environment_overrides_the_configuration_file_for_status_defaults() -> Result<(), FixtureError>
 {
-    let _lock = env_lock();
     let file = config_home(STATUS_FILE)?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[
+    let _env = EnvGuard::set(&ISOLATING).and(&[
         ("HOME", file.home.as_str()),
         ("DBAR_CMDS_STATUS_CLOCK_FORMAT", "%S"),
         ("DBAR_CMDS_STATUS_PR_CACHE_TTL_SECONDS", "22"),
@@ -66,10 +62,8 @@ fn the_environment_overrides_the_configuration_file_for_status_defaults() -> Res
     reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
 )]
 fn the_command_line_overrides_every_lower_layer_for_status_defaults() -> Result<(), FixtureError> {
-    let _lock = env_lock();
     let file = config_home(STATUS_FILE)?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[
+    let _env = EnvGuard::set(&ISOLATING).and(&[
         ("HOME", file.home.as_str()),
         ("DBAR_CMDS_STATUS_CLOCK_FORMAT", "%S"),
         ("DBAR_CMDS_STATUS_PR_CACHE_TTL_SECONDS", "22"),
@@ -97,10 +91,8 @@ fn the_command_line_overrides_every_lower_layer_for_status_defaults() -> Result<
     reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
 )]
 fn the_configuration_file_enables_the_install_flags() -> Result<(), FixtureError> {
-    let _lock = env_lock();
     let file = config_home(INSTALL_FILE)?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[("HOME", file.home.as_str())]);
+    let _env = EnvGuard::set(&ISOLATING).and(&[("HOME", file.home.as_str())]);
 
     // The regression: an omitted `--dry-run` used to arrive as `false` and
     // shadow the file, so both flags stayed off however the file was written.
@@ -117,10 +109,8 @@ fn the_configuration_file_enables_the_install_flags() -> Result<(), FixtureError
 )]
 fn the_environment_overrides_the_configuration_file_for_install_flags() -> Result<(), FixtureError>
 {
-    let _lock = env_lock();
     let file = config_home(INSTALL_FILE)?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[
+    let _env = EnvGuard::set(&ISOLATING).and(&[
         ("HOME", file.home.as_str()),
         ("DBAR_CMDS_INSTALL_DRY_RUN", "false"),
         ("DBAR_CMDS_INSTALL_FULL", "false"),
@@ -140,7 +130,6 @@ fn the_environment_overrides_the_configuration_file_for_install_flags() -> Resul
     reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
 )]
 fn the_command_line_overrides_every_lower_layer_for_install_flags() -> Result<(), FixtureError> {
-    let _lock = env_lock();
     // The file disables both flags and the environment leaves them alone, so a
     // flag that ends up on can only have come from the command line.
     let file = config_home(concat!(
@@ -148,8 +137,7 @@ fn the_command_line_overrides_every_lower_layer_for_install_flags() -> Result<()
         "dry_run = false\n",
         "full = false\n",
     ))?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[
+    let _env = EnvGuard::set(&ISOLATING).and(&[
         ("HOME", file.home.as_str()),
         ("DBAR_CMDS_INSTALL_DRY_RUN", "false"),
         ("DBAR_CMDS_INSTALL_FULL", "false"),
@@ -171,9 +159,7 @@ fn invalid_status_environment_values_are_reported_rather_than_exiting(
     #[case] key: &str,
     #[case] value: &str,
 ) {
-    let _lock = env_lock();
-    let _env = EnvGuard::set(&ISOLATING);
-    let _vars = EnvGuard::set(&[(key, value)]);
+    let _env = EnvGuard::set(&ISOLATING).and(&[(key, value)]);
 
     let err = load_command_from(["dbar", "status"])
         .expect_err("an invalid environment value must be rejected");
@@ -191,9 +177,7 @@ fn invalid_install_environment_values_are_reported_rather_than_exiting(
     #[case] key: &str,
     #[case] value: &str,
 ) {
-    let _lock = env_lock();
-    let _env = EnvGuard::set(&ISOLATING);
-    let _vars = EnvGuard::set(&[(key, value)]);
+    let _env = EnvGuard::set(&ISOLATING).and(&[(key, value)]);
 
     let err = load_command_from(["dbar", "install"])
         .expect_err("an invalid environment value must be rejected");
@@ -217,8 +201,7 @@ fn assert_file_value_is_a_merge_error(
     contents: &str,
 ) -> Result<(), FixtureError> {
     let file = config_home(contents)?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[("HOME", file.home.as_str())]);
+    let _env = EnvGuard::set(&ISOLATING).and(&[("HOME", file.home.as_str())]);
 
     let err = load_command_from(["dbar", subcommand])
         .expect_err("an invalid configuration value must be rejected");
@@ -239,6 +222,5 @@ fn invalid_configuration_file_values_are_reported_rather_than_exiting(
     #[case] subcommand: &str,
     #[case] contents: &str,
 ) -> Result<(), FixtureError> {
-    let _lock = env_lock();
     assert_file_value_is_a_merge_error(subcommand, contents)
 }

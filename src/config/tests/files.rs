@@ -19,10 +19,8 @@ const FILE_CONTENTS: &str = concat!(
     reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
 )]
 fn configuration_file_values_are_loaded() -> Result<(), FixtureError> {
-    let _lock = env_lock();
     let file = config_home(FILE_CONTENTS)?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[("HOME", file.home.as_str())]);
+    let _env = EnvGuard::set(&ISOLATING).and(&[("HOME", file.home.as_str())]);
 
     let args = status_of(load_command_from(["dbar", "status"]).expect("status parses"));
     assert_eq!(args.session.as_deref(), Some("from-file"));
@@ -36,14 +34,12 @@ fn configuration_file_values_are_loaded() -> Result<(), FixtureError> {
     reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
 )]
 fn the_configuration_file_overrides_the_documented_defaults() -> Result<(), FixtureError> {
-    let _lock = env_lock();
     let file = config_home(concat!(
         "[cmds.install]\n",
         "position = \"right\"\n",
         "path = \"/tmp/from-file.tmux.conf\"\n",
     ))?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[("HOME", file.home.as_str())]);
+    let _env = EnvGuard::set(&ISOLATING).and(&[("HOME", file.home.as_str())]);
 
     // The documented defaults are `left` and the home directory's `.tmux.conf`;
     // both differ from the file's values, so the file must be what won.
@@ -63,10 +59,8 @@ fn the_configuration_file_overrides_the_documented_defaults() -> Result<(), Fixt
     reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
 )]
 fn the_environment_overrides_the_configuration_file() -> Result<(), FixtureError> {
-    let _lock = env_lock();
     let file = config_home(FILE_CONTENTS)?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[
+    let _env = EnvGuard::set(&ISOLATING).and(&[
         ("HOME", file.home.as_str()),
         ("DBAR_CMDS_STATUS_SESSION", "from-env"),
     ]);
@@ -85,10 +79,8 @@ fn the_environment_overrides_the_configuration_file() -> Result<(), FixtureError
     reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
 )]
 fn the_command_line_overrides_the_configuration_file_and_environment() -> Result<(), FixtureError> {
-    let _lock = env_lock();
     let file = config_home(FILE_CONTENTS)?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[
+    let _env = EnvGuard::set(&ISOLATING).and(&[
         ("HOME", file.home.as_str()),
         ("DBAR_CMDS_STATUS_SESSION", "from-env"),
     ]);
@@ -106,10 +98,8 @@ fn the_command_line_overrides_the_configuration_file_and_environment() -> Result
     reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
 )]
 fn malformed_configuration_files_are_reported_rather_than_exiting() -> Result<(), FixtureError> {
-    let _lock = env_lock();
     let file = config_home("[cmds.status\nsession = \"unterminated\n")?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[("HOME", file.home.as_str())]);
+    let _env = EnvGuard::set(&ISOLATING).and(&[("HOME", file.home.as_str())]);
 
     let err = load_command_from(["dbar", "status"]).expect_err("a malformed file must be rejected");
     assert!(
@@ -121,9 +111,7 @@ fn malformed_configuration_files_are_reported_rather_than_exiting() -> Result<()
 
 #[rstest]
 fn install_environment_values_apply_when_the_command_line_is_silent() {
-    let _lock = env_lock();
-    let _env = EnvGuard::set(&ISOLATING);
-    let _vars = EnvGuard::set(&[
+    let _env = EnvGuard::set(&ISOLATING).and(&[
         ("DBAR_CMDS_INSTALL_POSITION", "right"),
         ("DBAR_CMDS_INSTALL_PATH", "/tmp/from-env.tmux.conf"),
     ]);
@@ -142,14 +130,12 @@ fn install_environment_values_apply_when_the_command_line_is_silent() {
     reason = "the test returns `Result` to propagate the fallible fixture with `?`; assertions remain the idiomatic failure mechanism"
 )]
 fn install_configuration_file_values_are_loaded() -> Result<(), FixtureError> {
-    let _lock = env_lock();
     let file = config_home(concat!(
         "[cmds.install]\n",
         "position = \"right\"\n",
         "path = \"/tmp/from-file.tmux.conf\"\n",
     ))?;
-    let _env = EnvGuard::set(&ISOLATING);
-    let _home = EnvGuard::set(&[("HOME", file.home.as_str())]);
+    let _env = EnvGuard::set(&ISOLATING).and(&[("HOME", file.home.as_str())]);
 
     let args = install_of(load_command_from(["dbar", "install"]).expect("install parses"));
     assert_eq!(args.position, Some(StatusPosition::Right));

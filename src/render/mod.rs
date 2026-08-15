@@ -135,7 +135,7 @@ fn render_right_segment(context: &RenderContext<'_>) -> Option<String> {
 }
 
 fn render_project_segment(project: &ProjectName) -> String {
-    let segment = format!(
+    format!(
         "{} {} {}{}{}{}",
         style(Some(COLOUR_PROJECT_FG), Some(COLOUR_PROJECT_BG)),
         escape_tmux(project.as_ref()),
@@ -143,8 +143,7 @@ fn render_project_segment(project: &ProjectName) -> String {
         GLYPH_FADE_RIGHT,
         style(None, None),
         reset(),
-    );
-    segment
+    )
 }
 
 fn render_branch_segment(status: &GitStatus) -> String {

@@ -109,15 +109,50 @@ struct ConstructScan {
     styles: usize,
     /// Introducer of the first surviving `#{` or `#(` construct, if any.
     active: Option<char>,
+    /// Body of the first `#[...]` tag outside the renderer's vocabulary.
+    foreign: Option<String>,
+}
+
+/// Whether one `fg=`/`bg=` clause is one the renderer itself emits.
+///
+/// `style` emits `fg=colourN` and `bg=colourN`, and `reset_bg_with_fg` emits
+/// `bg=default`. Nothing else — notably no named colour such as `red` — is
+/// renderer-owned, so anything else must have come from a dynamic value.
+fn is_renderer_clause(clause: &str) -> bool {
+    fn is_indexed_colour(value: &str) -> bool {
+        value
+            .strip_prefix("colour")
+            .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+    }
+
+    match clause.split_once('=') {
+        Some(("fg", value)) => is_indexed_colour(value),
+        Some(("bg", value)) => value == "default" || is_indexed_colour(value),
+        Some(_) | None => false,
+    }
+}
+
+/// Whether a `#[...]` body is one the renderer itself emits.
+///
+/// The full vocabulary is `default` (from `reset` and `style(None, None)`) and
+/// comma-separated `fg`/`bg` clauses (from `style` and `reset_bg_with_fg`).
+fn is_renderer_style(body: &str) -> bool {
+    body == "default" || body.split(',').all(is_renderer_clause)
 }
 
 /// Scan a rendered line the way tmux does.
 ///
-/// `##` is a literal `#`, `#[` opens one of the renderer's own style tags, and
-/// `#{` or `#(` would be an interpreted format or command.
+/// `##` is a literal `#`, `#[` opens a style tag, and `#{` or `#(` would be an
+/// interpreted format or command. A style tag is only counted as the
+/// renderer's own when its body matches the renderer's vocabulary; any other
+/// body must have arrived through a dynamic value that escaping should have
+/// neutralised, and is reported through `foreign` instead. Without that check
+/// an injected `#[fg=red]` would satisfy the "style tags survive" assertion and
+/// mask a missing `escape_tmux` call.
 fn scan_constructs(line: &str) -> ConstructScan {
     let mut styles = 0_usize;
     let mut active = None;
+    let mut foreign: Option<String> = None;
     let mut chars = line.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch != '#' {
@@ -127,12 +162,40 @@ fn scan_constructs(line: &str) -> ConstructScan {
             Some('#') => {
                 chars.next();
             }
-            Some('[') => styles += 1,
+            Some('[') => {
+                chars.next();
+                let body: String = chars.by_ref().take_while(|next| *next != ']').collect();
+                if is_renderer_style(&body) {
+                    styles += 1;
+                } else {
+                    foreign = foreign.or(Some(body));
+                }
+            }
             Some(&other) if other == '{' || other == '(' => active = active.or(Some(other)),
             Some(_) | None => {}
         }
     }
-    ConstructScan { styles, active }
+    ConstructScan {
+        styles,
+        active,
+        foreign,
+    }
+}
+
+#[test]
+fn scan_constructs_rejects_value_derived_style_tags() {
+    let renderer_only = scan_constructs("#[fg=colour117,bg=colour24]x#[fg=colour24,bg=default]y");
+    assert_eq!(renderer_only.styles, 2);
+    assert_eq!(renderer_only.foreign, None);
+
+    let injected = scan_constructs("#[default]a#[fg=red]b");
+    assert_eq!(injected.styles, 1);
+    assert_eq!(injected.foreign.as_deref(), Some("fg=red"));
+
+    // An escaped tag is a literal `#` followed by plain text, not a tag.
+    let escaped = scan_constructs("##[fg=red]");
+    assert_eq!(escaped.styles, 0);
+    assert_eq!(escaped.foreign, None);
 }
 
 /// Hostile values must not introduce unescaped tmux markup.
@@ -148,6 +211,10 @@ fn hostile_values_are_neutralised_in_every_segment(#[case] hostile: &str) {
     assert!(
         scan.active.is_none(),
         "unescaped introducer survived in: {line}"
+    );
+    assert_eq!(
+        scan.foreign, None,
+        "a value-derived style tag survived in: {line}"
     );
     // The renderer's own style tags are still emitted, unescaped.
     assert!(
@@ -260,6 +327,10 @@ proptest! {
         let line = render_dynamic(&DynamicValues { project, branch, pr, clock, session, socket });
         let scan = scan_constructs(&line);
         prop_assert!(scan.active.is_none(), "active construct survived in: {line}");
+        prop_assert!(
+            scan.foreign.is_none(),
+            "a value-derived style tag survived in: {line}"
+        );
         prop_assert!(scan.styles > 0, "renderer style tags were escaped away: {line}");
     }
 

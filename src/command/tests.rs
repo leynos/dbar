@@ -1,4 +1,10 @@
 //! Tests for real command execution, timeout handling, output limits, and error mapping.
+//!
+//! Every case spawns a POSIX utility (`printf`, `false`, `sh`, `sleep`), and the
+//! process-group assertions describe Unix semantics, so the module is compiled
+//! only on Unix. The crate itself stays portable: `src/command/mod.rs` keeps its
+//! non-Unix `use_own_process_group` and `signal_process_group` stubs.
+#![cfg(unix)]
 use super::*;
 use rstest::rstest;
 use std::time::Instant;

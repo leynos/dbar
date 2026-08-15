@@ -78,12 +78,16 @@ fn digest(project_dir: &str, branch: &str) -> u64 {
 ///
 /// let path = pr_cache_path(
 ///     Utf8Path::new("/cache"),
-///     "main",
 ///     Utf8Path::new("/projects/demo"),
+///     "main",
 /// );
 /// assert!(path.as_str().ends_with(".json"));
 /// ```
-pub fn pr_cache_path(cache_dir: &Utf8Path, branch: &str, project_dir: &Utf8Path) -> Utf8PathBuf {
+///
+/// The project directory precedes the branch, matching the order in which the
+/// two fields are absorbed into the digest, so the signature cannot invite a
+/// transposition that would silently change the key.
+pub fn pr_cache_path(cache_dir: &Utf8Path, project_dir: &Utf8Path, branch: &str) -> Utf8PathBuf {
     let value = digest(project_dir.as_str(), branch);
     cache_dir.join(format!("pr_{value:016x}.json"))
 }
@@ -113,8 +117,8 @@ mod tests {
         #[case] right_branch: &str,
     ) {
         let cache_dir = Utf8PathBuf::from("/cache");
-        let left = pr_cache_path(&cache_dir, left_branch, &Utf8PathBuf::from(left_dir));
-        let right = pr_cache_path(&cache_dir, right_branch, &Utf8PathBuf::from(right_dir));
+        let left = pr_cache_path(&cache_dir, &Utf8PathBuf::from(left_dir), left_branch);
+        let right = pr_cache_path(&cache_dir, &Utf8PathBuf::from(right_dir), right_branch);
         assert_ne!(left, right);
     }
 
@@ -122,8 +126,8 @@ mod tests {
     fn identical_inputs_produce_a_stable_cache_path() {
         let cache_dir = Utf8PathBuf::from("/cache");
         let project_dir = Utf8PathBuf::from("/projects/demo");
-        let first = pr_cache_path(&cache_dir, "main", &project_dir);
-        let second = pr_cache_path(&cache_dir, "main", &project_dir);
+        let first = pr_cache_path(&cache_dir, &project_dir, "main");
+        let second = pr_cache_path(&cache_dir, &project_dir, "main");
         assert_eq!(first, second);
     }
 
@@ -143,9 +147,20 @@ mod tests {
     }
 
     #[rstest]
+    fn absorb_matches_the_published_fnv_1a_64_vector() {
+        // The published FNV-1a 64-bit test vector for the single byte `a`,
+        // taken from the FNV reference test suite rather than from this
+        // implementation. `digest_matches_the_documented_algorithm` re-derives
+        // the framed digest with the same arithmetic as the code, so it would
+        // survive a change to the offset basis or the prime; this one would
+        // not. Together they pin both the mixing function and the framing.
+        assert_eq!(absorb(FNV_OFFSET_BASIS, b"a"), 0xaf63_dc4c_8601_ec8c);
+    }
+
+    #[rstest]
     fn cache_path_is_named_after_the_digest() {
         let cache_dir = Utf8PathBuf::from("/cache");
-        let path = pr_cache_path(&cache_dir, "c", &Utf8PathBuf::from("/ab"));
+        let path = pr_cache_path(&cache_dir, &Utf8PathBuf::from("/ab"), "c");
         let expected = format!("/cache/pr_{:016x}.json", digest("/ab", "c"));
         assert_eq!(path.as_str(), expected);
     }

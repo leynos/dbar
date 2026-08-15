@@ -106,7 +106,12 @@ fn require_output(world: &World) -> Result<&String, String> {
 }
 
 fn init_repo(world: &World, is_dirty: bool) -> io::Result<()> {
-    run_git(world, ["init", "-b", "main"])?;
+    // An empty template keeps the developer's `~/.git-templates` hooks and
+    // description out of the fixture repository.
+    run_git(world, ["init", "-b", "main", "--template="])?;
+    // Pin the repository-local settings the steps depend on rather than
+    // inheriting whatever the ambient configuration would have supplied.
+    run_git(world, ["config", "core.hooksPath", "/dev/null"])?;
     if is_dirty {
         write_repo_file(world, "seed")?;
         run_git(world, ["add", "demo.txt"])?;
@@ -120,14 +125,33 @@ fn write_repo_file(world: &World, contents: &str) -> io::Result<()> {
         .and_then(|dir| dir.write("demo.txt", contents))
 }
 
+/// Run git in the scenario's repository, isolated from ambient configuration.
+///
+/// A developer's global or system configuration can otherwise reach into the
+/// fixture — `init.defaultBranch`, `core.hooksPath`, `init.templateDir` and
+/// the like — and change what the steps observe. Pointing both configuration
+/// files at `/dev/null` and setting `GIT_CONFIG_NOSYSTEM` makes the repository
+/// depend only on the arguments passed here.
 fn run_git(world: &World, args: impl IntoIterator<Item = &'static str>) -> io::Result<()> {
-    let status = Command::new("git")
-        .args(args)
+    let git_args: Vec<&'static str> = args.into_iter().collect();
+    let output = Command::new("git")
+        .args(&git_args)
         .current_dir(world.repo_dir.as_std_path())
-        .status()?;
-    if status.success() {
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()?;
+    if output.status.success() {
         Ok(())
     } else {
-        Err(io::Error::other("git command failed"))
+        // Carry the invocation and git's own diagnosis into the error: a bare
+        // "git command failed" says nothing about which step broke or why.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(io::Error::other(format!(
+            "`git {}` failed with {}: {}",
+            git_args.join(" "),
+            output.status,
+            stderr.trim()
+        )))
     }
 }

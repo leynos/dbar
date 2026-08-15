@@ -6,6 +6,28 @@
 //! replays that reading before applying `unicode-width`, mirroring
 //! `visible_width` in `src/render/mod.rs` so the tests measure what tmux would
 //! actually draw.
+//!
+//! # Why this duplicates the renderer rather than calling it
+//!
+//! The obvious alternative is to export `render::visible_width` from the crate
+//! root and call it here. It is rejected on two counts.
+//!
+//! The crate's public API is deliberately just `run` and `DbarError`: dbar is a
+//! binary with a thin library face, and every additional public item becomes a
+//! semantic-versioning commitment made for a test's convenience rather than for
+//! a caller. Widening that surface is a real, permanent cost.
+//!
+//! More importantly, it would gut the assertion it serves. The snapshot test
+//! checks that a rendered line fills the requested client width exactly. If it
+//! measured that line with the very function the renderer used to lay it out,
+//! the two would agree by construction — a miscount in `visible_width` would
+//! shift the padding and the measurement together, and the assertion would pass
+//! regardless. An independent reading of tmux's rules is what makes the check
+//! capable of failing, so the duplication is the point.
+//!
+//! The cost is that the two must be kept in step. That is bounded: tmux's
+//! escaping rules are fixed and short, and a divergence surfaces immediately as
+//! a failing width assertion rather than silently.
 
 use std::iter::Peekable;
 use std::str::Chars;

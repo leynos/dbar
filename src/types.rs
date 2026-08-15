@@ -233,8 +233,9 @@ impl FromStr for CacheTtlSeconds {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
-// Serde uses the same lowercase spellings as `Display` and `FromStr`, so a
-// configuration file and a command-line flag accept identical values.
+// Serde uses the same lowercase spellings as `Display` and `FromStr`, and
+// `FromStr` accepts nothing else, so a configuration file, an environment
+// variable, and a command-line flag all take exactly `left` or `right`.
 #[serde(rename_all = "lowercase")]
 /// tmux status line placement for the install snippet.
 pub enum StatusPosition {
@@ -259,8 +260,8 @@ impl FromStr for StatusPosition {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "left" | "Left" => Ok(Self::Left),
-            "right" | "Right" => Ok(Self::Right),
+            "left" => Ok(Self::Left),
+            "right" => Ok(Self::Right),
             _ => Err(format!("invalid status position: {value}")),
         }
     }
@@ -311,9 +312,7 @@ mod tests {
 
     #[rstest]
     #[case("left", StatusPosition::Left)]
-    #[case("Left", StatusPosition::Left)]
     #[case("right", StatusPosition::Right)]
-    #[case("Right", StatusPosition::Right)]
     fn status_position_parses_valid_values(#[case] input: &str, #[case] expected: StatusPosition) {
         assert_eq!(input.parse::<StatusPosition>().expect("valid"), expected);
     }
@@ -322,6 +321,10 @@ mod tests {
     #[case::empty("")]
     #[case::unknown("middle")]
     #[case::upper("LEFT")]
+    // Serde rejects the capitalized spellings, so `FromStr` must too; see
+    // `status_position_rejects_capitalized_serde_values`.
+    #[case::capitalized_left("Left")]
+    #[case::capitalized_right("Right")]
     #[case::padded(" left")]
     fn status_position_rejects_invalid_values(#[case] input: &str) {
         let err = input
@@ -367,6 +370,10 @@ mod tests {
     #[rstest]
     fn status_position_rejects_capitalized_serde_values() {
         assert!(serde_json::from_str::<StatusPosition>("\"Left\"").is_err());
+        assert!(serde_json::from_str::<StatusPosition>("\"Right\"").is_err());
+        // The command-line and file layers agree on the rejection.
+        assert!("Left".parse::<StatusPosition>().is_err());
+        assert!("Right".parse::<StatusPosition>().is_err());
     }
 
     #[rstest]

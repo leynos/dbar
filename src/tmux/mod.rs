@@ -123,10 +123,10 @@ pub enum TmuxProbeFailure {
 pub enum TmuxOutcome {
     /// Every field was already supplied, so tmux was never queried.
     PreResolved,
-    /// tmux was queried; `malformed` lists the fields it left unusable.
+    /// tmux was queried; `empty` lists the fields it left unset.
     Queried {
-        /// Fields that were needed but came back empty.
-        malformed: Vec<TmuxProbeFailure>,
+        /// Fields that were needed but came back with an empty value.
+        empty: Vec<TmuxProbeFailure>,
     },
     /// A query failed, so no field was filled in.
     Unavailable(TmuxProbeFailure),
@@ -157,7 +157,7 @@ impl TmuxResolution {
     pub fn into_failures(self) -> Vec<TmuxProbeFailure> {
         match self.outcome {
             TmuxOutcome::PreResolved => Vec::new(),
-            TmuxOutcome::Queried { malformed } => malformed,
+            TmuxOutcome::Queried { empty } => empty,
             TmuxOutcome::Unavailable(failure) => vec![failure],
         }
     }
@@ -228,14 +228,14 @@ fn query_fields(runner: &dyn CommandRunner) -> Result<Vec<(TmuxField, String)>, 
 
 /// Fill each unset field from the queried values, recording empty answers.
 fn merge_fields(mut context: TmuxContext, values: Vec<(TmuxField, String)>) -> TmuxResolution {
-    let mut malformed = Vec::new();
+    let mut empty = Vec::new();
     for (field, value) in values {
         let slot = context.slot_mut(field);
         if slot.is_some() {
             continue;
         }
         if value.is_empty() {
-            malformed.push(TmuxProbeFailure::EmptyValue { field });
+            empty.push(TmuxProbeFailure::EmptyValue { field });
             continue;
         }
         *slot = Some(value);
@@ -243,7 +243,7 @@ fn merge_fields(mut context: TmuxContext, values: Vec<(TmuxField, String)>) -> T
 
     TmuxResolution {
         context,
-        outcome: TmuxOutcome::Queried { malformed },
+        outcome: TmuxOutcome::Queried { empty },
     }
 }
 

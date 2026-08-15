@@ -86,7 +86,7 @@ fn cache_dir() -> Utf8PathBuf {
 
 /// Build the cache path for a `(project directory, branch)` pair.
 fn path_for(project_dir: &str, branch: &str) -> Utf8PathBuf {
-    pr_cache_path(cache_dir().as_path(), branch, Utf8Path::new(project_dir))
+    pr_cache_path(cache_dir().as_path(), Utf8Path::new(project_dir), branch)
 }
 
 /// Split `content` after `count` characters, without slicing a `str`.
@@ -109,8 +109,13 @@ fn content_and_two_splits() -> impl Strategy<Value = (Vec<char>, usize, usize)> 
 }
 
 proptest! {
-    // Bounded and deterministic for continuous integration; regression files
-    // are disabled because the repository tracks none.
+    // Bounded, not deterministic: no `rng_seed` is pinned, so each run draws a
+    // fresh seed and explores a different sample of the domain. That is
+    // deliberate — these properties are about a hash, where wider coverage
+    // across runs is worth more than a reproducible sample. `failure_persistence`
+    // is `None` because the repository tracks no regression corpus, so a
+    // counter-example must be reproduced from the seed printed in the failure
+    // output rather than from a file proptest would otherwise write untracked.
     #![proptest_config(ProptestConfig {
         cases: DISTINCTNESS_CASES,
         failure_persistence: None,

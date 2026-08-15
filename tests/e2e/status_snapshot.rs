@@ -14,12 +14,7 @@ const CLIENT_WIDTH: usize = 80;
 #[test]
 fn status_snapshot_without_git() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let temp_dir_path = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
-        .expect("temp dir path is not utf8");
-    let project_dir = temp_dir_path.join("project");
-    cap_std::fs_utf8::Dir::open_ambient_dir(temp_dir_path.as_path(), cap_std::ambient_authority())
-        .and_then(|dir| dir.create_dir("project"))
-        .expect("create project dir");
+    let project_dir = create_project_dir(&temp_dir).expect("create project dir");
 
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("dbar");
     cmd.args([
@@ -45,12 +40,7 @@ fn status_snapshot_without_git() {
 #[test]
 fn status_renders_configured_clock() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let temp_dir_path = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
-        .expect("temp dir path is not utf8");
-    let project_dir = temp_dir_path.join("project");
-    cap_std::fs_utf8::Dir::open_ambient_dir(temp_dir_path.as_path(), cap_std::ambient_authority())
-        .and_then(|dir| dir.create_dir("project"))
-        .expect("create project dir");
+    let project_dir = create_project_dir(&temp_dir).expect("create project dir");
 
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("dbar");
     cmd.args([
@@ -78,9 +68,10 @@ fn status_renders_configured_clock() {
 #[test]
 fn status_snapshot_clean_git_full_width_with_pr() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let repo_dir = create_repo_dir(&temp_dir).expect("create repo dir");
+    let repo_dir = create_project_dir(&temp_dir).expect("create project dir");
     init_repo(&repo_dir).expect("init repo");
 
+    let client_width = CLIENT_WIDTH.to_string();
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("dbar");
     cmd.args([
         "status",
@@ -90,9 +81,8 @@ fn status_snapshot_clean_git_full_width_with_pr() {
         "true",
         "--github-mock-pr",
         "42",
-        // Keep this literal in step with `CLIENT_WIDTH`.
         "--client-width",
-        "80",
+        client_width.as_str(),
         "--session",
         "demo",
         "--window",
@@ -127,7 +117,7 @@ fn status_snapshot_clean_git_full_width_with_pr() {
 #[test]
 fn status_snapshot_dirty_git_default_width() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let repo_dir = create_repo_dir(&temp_dir).expect("create repo dir");
+    let repo_dir = create_project_dir(&temp_dir).expect("create project dir");
     init_repo(&repo_dir).expect("init repo");
     mark_repo_dirty(&repo_dir).expect("mark repo dirty");
 
@@ -153,7 +143,9 @@ fn status_snapshot_dirty_git_default_width() {
 }
 
 fn init_repo(path: &Utf8PathBuf) -> io::Result<()> {
-    run_git(path, ["init", "-b", "main"])?;
+    // An empty template keeps the developer's `~/.git-templates` hooks and
+    // description out of the fixture repository.
+    run_git(path, ["init", "-b", "main", "--template="])?;
     write_file(path, "README.md", "seed")?;
     run_git(path, ["add", "README.md"])?;
     run_git(
@@ -170,13 +162,13 @@ fn init_repo(path: &Utf8PathBuf) -> io::Result<()> {
     )
 }
 
-fn create_repo_dir(temp_dir: &TempDir) -> io::Result<Utf8PathBuf> {
+fn create_project_dir(temp_dir: &TempDir) -> io::Result<Utf8PathBuf> {
     let temp_dir_path = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "temp dir path is not utf8"))?;
-    let repo_dir = temp_dir_path.join("project");
+    let project_dir = temp_dir_path.join("project");
     cap_std::fs_utf8::Dir::open_ambient_dir(temp_dir_path.as_path(), cap_std::ambient_authority())
         .and_then(|dir| dir.create_dir("project"))?;
-    Ok(repo_dir)
+    Ok(project_dir)
 }
 
 fn mark_repo_dirty(path: &Utf8PathBuf) -> io::Result<()> {
@@ -190,10 +182,20 @@ fn write_file(path: &Utf8PathBuf, name: &str, contents: &str) -> io::Result<()> 
         .and_then(|dir| dir.write(name, contents))
 }
 
+/// Run git in `path`, isolated from the developer's own git configuration.
+///
+/// A global or system configuration can otherwise reach into the fixture —
+/// `init.defaultBranch`, `core.hooksPath`, `init.templateDir` and the like —
+/// and change what the snapshots record. Pointing both configuration files at
+/// `/dev/null` and setting `GIT_CONFIG_NOSYSTEM` makes the repository depend
+/// only on the arguments below.
 fn run_git(path: &Utf8PathBuf, args: impl IntoIterator<Item = &'static str>) -> io::Result<()> {
     let status = Command::new("git")
         .args(args)
         .current_dir(path.as_std_path())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
         .status()?;
     if status.success() {
         Ok(())

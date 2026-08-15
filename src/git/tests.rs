@@ -121,11 +121,20 @@ fn project_name_prefers_origin(#[case] origin: &str, #[case] expected: &str) {
     assert_eq!(name.as_ref(), expected);
 }
 
-#[test]
-fn project_name_falls_back_to_worktree_path() {
+#[rstest]
+// The marker suffixed onto the project directory itself.
+#[case::suffixed_marker("/tmp/repo.worktrees/feat", "repo")]
+// The marker as its own directory: the segment before it ends in a separator,
+// which must not be read as an empty project name.
+#[case::marker_as_a_directory("/tmp/project/.worktrees/branch", "project")]
+// Nothing precedes the marker, so there is no name to recover and the final
+// path component stands in.
+#[case::marker_at_the_root("/.worktrees/branch", "branch")]
+#[case::marker_first("/tmp/.worktrees/branch", "tmp")]
+fn project_name_falls_back_to_worktree_path(#[case] dir: &str, #[case] expected: &str) {
     let runner = Answers::default().build();
-    let name = project_name(&runner, Utf8Path::new("/tmp/repo.worktrees/feat"));
-    assert_eq!(name.as_ref(), "repo");
+    let name = project_name(&runner, Utf8Path::new(dir));
+    assert_eq!(name.as_ref(), expected);
 }
 
 #[rstest]

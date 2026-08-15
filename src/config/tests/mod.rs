@@ -3,11 +3,13 @@
 //!
 //! `ortho_config` reads `DBAR_*` variables and configuration files from the
 //! ambient environment and offers no way to inject a substitute, so these cases
-//! mutate the real environment through [`crate::test_support`], which serializes
-//! them on one crate-wide lock and restores every variable they touch.
+//! mutate the real environment through [`EnvGuard`], which takes one crate-wide
+//! lock for its lifetime and restores every variable it touched.
 //! [`crate::test_support`] records why injection is not available. Argument-only
-//! cases take the lock as well, because a stray `DBAR_*` value would otherwise
-//! perturb them.
+//! cases build a guard too, because a stray `DBAR_*` value would otherwise
+//! perturb them, and because the guard is what holds the lock. The mutex is not
+//! reentrant, so a case that needs more variables chains [`EnvGuard::and`] onto
+//! its one guard rather than building a second.
 //!
 //! Note that subcommand merging does *not* honour `DBAR_CONFIG_PATH`:
 //! `ortho_config` builds its candidate list from `$HOME/.dbar.toml`, the XDG
@@ -19,7 +21,7 @@ mod files;
 mod precedence;
 
 use super::*;
-use crate::test_support::{EnvGuard, env_lock};
+use crate::test_support::EnvGuard;
 use cap_std::ambient_authority;
 use cap_std::fs_utf8::Dir;
 use rstest::rstest;

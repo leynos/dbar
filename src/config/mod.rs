@@ -98,7 +98,7 @@ pub struct StatusArgs {
     #[arg(long)]
     pub clock_format: Option<String>,
     /// Mock PR number for GitHub lookups (used in tests).
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub github_mock_pr: Option<String>,
     /// Cache TTL for PR lookups, in seconds.
     // Optional for the same reason as `clock_format`; consumers fall back to
@@ -111,8 +111,7 @@ pub struct StatusArgs {
 }
 
 impl StatusArgs {
-    /// The clock format to render with, or [`DEFAULT_CLOCK_FORMAT`] if no
-    /// layer supplied one.
+    /// The clock format to render with, or `%H:%M` if no layer supplied one.
     ///
     /// # Examples
     ///
@@ -242,7 +241,9 @@ pub fn load_command() -> Result<DbarCommand, ConfigError> {
         // Render help, version, and usage errors then exit, preserving the
         // conventional command-line behaviour and exit codes.
         ConfigError::Cli(cli) => cli.exit(),
-        ConfigError::Merge(merge) => ConfigError::Merge(merge),
+        // Every other variant is returned unchanged, so that a variant added
+        // later is reported rather than silently exiting the process.
+        other => other,
     })
 }
 
@@ -280,6 +281,15 @@ pub enum ConfigError {
     /// Environment or configuration-file values could not be merged.
     #[error(transparent)]
     Merge(#[from] Arc<ortho_config::OrthoError>),
+    /// `clock_format` is not a format chrono can render.
+    ///
+    /// Held here rather than raised as an `io::Error`, because an unrenderable
+    /// format is a configuration fault, not a failed system call, and naming it
+    /// as such is what lets a caller tell the two apart. The offending value is
+    /// carried so the message stays actionable; no other configuration is
+    /// disclosed.
+    #[error("invalid clock_format {0:?}")]
+    InvalidClockFormat(String),
 }
 
 #[cfg(test)]

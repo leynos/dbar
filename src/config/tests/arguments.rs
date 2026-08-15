@@ -6,7 +6,6 @@ use super::*;
 
 #[rstest]
 fn documented_defaults_apply_when_nothing_overrides_them() {
-    let _lock = env_lock();
     let _env = EnvGuard::set(&ISOLATING);
 
     let args = status_of(load_command_from(["dbar", "status"]).expect("bare status parses"));
@@ -28,7 +27,6 @@ fn documented_defaults_apply_when_nothing_overrides_them() {
 
 #[rstest]
 fn command_line_values_are_applied() {
-    let _lock = env_lock();
     let _env = EnvGuard::set(&ISOLATING);
 
     let args = status_of(
@@ -57,7 +55,6 @@ fn command_line_values_are_applied() {
 
 #[rstest]
 fn install_arguments_are_applied() {
-    let _lock = env_lock();
     let _env = EnvGuard::set(&ISOLATING);
 
     let command = load_command_from(["dbar", "install", "--position", "right", "--full"])
@@ -74,9 +71,7 @@ fn install_arguments_are_applied() {
 
 #[rstest]
 fn environment_values_apply_when_the_command_line_is_silent() {
-    let _lock = env_lock();
-    let _env = EnvGuard::set(&ISOLATING);
-    let _vars = EnvGuard::set(&[("DBAR_CMDS_STATUS_SESSION", "from-env")]);
+    let _env = EnvGuard::set(&ISOLATING).and(&[("DBAR_CMDS_STATUS_SESSION", "from-env")]);
 
     let args = status_of(load_command_from(["dbar", "status"]).expect("status parses"));
     assert_eq!(args.session.as_deref(), Some("from-env"));
@@ -84,9 +79,7 @@ fn environment_values_apply_when_the_command_line_is_silent() {
 
 #[rstest]
 fn the_command_line_overrides_the_environment() {
-    let _lock = env_lock();
-    let _env = EnvGuard::set(&ISOLATING);
-    let _vars = EnvGuard::set(&[("DBAR_CMDS_STATUS_SESSION", "from-env")]);
+    let _env = EnvGuard::set(&ISOLATING).and(&[("DBAR_CMDS_STATUS_SESSION", "from-env")]);
 
     let args = status_of(
         load_command_from(["dbar", "status", "--session", "from-cli"]).expect("status parses"),
@@ -101,7 +94,6 @@ fn the_command_line_overrides_the_environment() {
 #[case::invalid_position(&["dbar", "install", "--position", "sideways"])]
 #[case::missing_value(&["dbar", "status", "--session"])]
 fn invalid_arguments_are_reported_rather_than_exiting(#[case] argv: &[&str]) {
-    let _lock = env_lock();
     let _env = EnvGuard::set(&ISOLATING);
 
     let err =

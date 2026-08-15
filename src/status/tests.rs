@@ -3,7 +3,7 @@
 //! rendering, and the assembled status line's diagnostics.
 
 use super::*;
-use crate::command::{CommandError, CommandOutput, CommandSpec};
+use crate::command::{CommandError, MockCommandRunner};
 use crate::github::GitHubError;
 use crate::types::{CacheTtlSeconds, PrNumber};
 use camino::Utf8Path;
@@ -58,15 +58,19 @@ impl GitHubClient for StubGitHubClient {
 }
 
 /// A runner that fails every command, standing in for missing binaries.
-struct FailingRunner;
-
-impl CommandRunner for FailingRunner {
-    fn run(&self, _spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
+///
+/// `times(1..)` rather than a bare `returning`: the point of the test that uses
+/// it is that the probes really are attempted and their failures absorbed, so a
+/// status line assembled without running anything must not pass.
+fn failing_runner() -> MockCommandRunner {
+    let mut runner = MockCommandRunner::new();
+    runner.expect_run().times(1..).returning(|_| {
         Err(CommandError::NonZero {
             status: Some(1),
             stderr: String::new(),
         })
-    }
+    });
+    runner
 }
 
 /// The project directory every PR lookup in these tests is scoped to.
@@ -75,10 +79,16 @@ const PROJECT_DIR: &str = "/projects/demo";
 /// The branch every PR lookup in these tests is scoped to.
 const BRANCH: &str = "pr/7";
 
-/// A temporary directory used as the cache root.
+/// A temporary directory and its UTF-8 path, used as the cache root.
+///
+/// Both halves are returned because dropping the [`TempDir`] deletes the
+/// directory, so a test must hold the guard for as long as it uses the path.
+/// A tuple keeps that ownership requirement visible at every call site.
 #[fixture]
-fn cache_root() -> io::Result<TempDir> {
-    TempDir::new()
+fn cache_root() -> io::Result<(TempDir, Utf8PathBuf)> {
+    let dir = TempDir::new()?;
+    let path = utf8_path(&dir)?;
+    Ok((dir, path))
 }
 
 /// Build status arguments pointing at the given cache directory.
@@ -135,11 +145,10 @@ fn rendered(report: &PrLookupReport) -> Option<String> {
 }
 
 #[rstest]
-fn a_fresh_cache_entry_short_circuits_the_lookup(cache_root: io::Result<TempDir>) {
-    let temp_dir = cache_root.expect("temp dir");
-    let cache_dir = utf8_path(&temp_dir).expect("cache dir");
+fn a_fresh_cache_entry_short_circuits_the_lookup(cache_root: io::Result<(TempDir, Utf8PathBuf)>) {
+    let (_guard, cache_dir) = cache_root.expect("cache root");
     let clock = DefaultClock;
-    let path = pr_cache_path(&cache_dir, BRANCH, Utf8Path::new(PROJECT_DIR));
+    let path = pr_cache_path(&cache_dir, Utf8Path::new(PROJECT_DIR), BRANCH);
     cache::store_cached_value(&path, &clock, "42").expect("seed cache");
 
     let github = StubGitHubClient::new(Reply::Found("99"));
@@ -158,11 +167,12 @@ fn a_fresh_cache_entry_short_circuits_the_lookup(cache_root: io::Result<TempDir>
 }
 
 #[rstest]
-fn an_empty_cache_entry_records_that_there_is_no_pr(cache_root: io::Result<TempDir>) {
-    let temp_dir = cache_root.expect("temp dir");
-    let cache_dir = utf8_path(&temp_dir).expect("cache dir");
+fn an_empty_cache_entry_records_that_there_is_no_pr(
+    cache_root: io::Result<(TempDir, Utf8PathBuf)>,
+) {
+    let (_guard, cache_dir) = cache_root.expect("cache root");
     let clock = DefaultClock;
-    let path = pr_cache_path(&cache_dir, BRANCH, Utf8Path::new(PROJECT_DIR));
+    let path = pr_cache_path(&cache_dir, Utf8Path::new(PROJECT_DIR), BRANCH);
     cache::store_cached_value(&path, &clock, "").expect("seed cache");
 
     let github = StubGitHubClient::new(Reply::Found("99"));
@@ -174,9 +184,10 @@ fn an_empty_cache_entry_records_that_there_is_no_pr(cache_root: io::Result<TempD
 }
 
 #[rstest]
-fn a_cache_miss_consults_github_and_stores_the_answer(cache_root: io::Result<TempDir>) {
-    let temp_dir = cache_root.expect("temp dir");
-    let cache_dir = utf8_path(&temp_dir).expect("cache dir");
+fn a_cache_miss_consults_github_and_stores_the_answer(
+    cache_root: io::Result<(TempDir, Utf8PathBuf)>,
+) {
+    let (_guard, cache_dir) = cache_root.expect("cache root");
     let clock = DefaultClock;
     let github = StubGitHubClient::new(Reply::Found("42"));
 
@@ -189,15 +200,16 @@ fn a_cache_miss_consults_github_and_stores_the_answer(cache_root: io::Result<Tem
     assert_eq!(github.calls.get(), 1);
     assert!(exists(&pr_cache_path(
         &cache_dir,
-        BRANCH,
-        Utf8Path::new(PROJECT_DIR)
+        Utf8Path::new(PROJECT_DIR),
+        BRANCH
     )));
 }
 
 #[rstest]
-fn a_branch_fallback_is_cached_when_github_reports_no_pr(cache_root: io::Result<TempDir>) {
-    let temp_dir = cache_root.expect("temp dir");
-    let cache_dir = utf8_path(&temp_dir).expect("cache dir");
+fn a_branch_fallback_is_cached_when_github_reports_no_pr(
+    cache_root: io::Result<(TempDir, Utf8PathBuf)>,
+) {
+    let (_guard, cache_dir) = cache_root.expect("cache root");
     let clock = DefaultClock;
     let github = StubGitHubClient::new(Reply::NoPr);
 
@@ -209,11 +221,12 @@ fn a_branch_fallback_is_cached_when_github_reports_no_pr(cache_root: io::Result<
 }
 
 #[rstest]
-fn a_corrupt_cache_entry_is_reported_and_treated_as_a_miss(cache_root: io::Result<TempDir>) {
-    let temp_dir = cache_root.expect("temp dir");
-    let cache_dir = utf8_path(&temp_dir).expect("cache dir");
+fn a_corrupt_cache_entry_is_reported_and_treated_as_a_miss(
+    cache_root: io::Result<(TempDir, Utf8PathBuf)>,
+) {
+    let (_guard, cache_dir) = cache_root.expect("cache root");
     let clock = DefaultClock;
-    let path = pr_cache_path(&cache_dir, BRANCH, Utf8Path::new(PROJECT_DIR));
+    let path = pr_cache_path(&cache_dir, Utf8Path::new(PROJECT_DIR), BRANCH);
     write_raw(&path, "{ not json").expect("write corrupt entry");
 
     let github = StubGitHubClient::new(Reply::Found("42"));
@@ -233,9 +246,10 @@ fn a_corrupt_cache_entry_is_reported_and_treated_as_a_miss(cache_root: io::Resul
 }
 
 #[rstest]
-fn a_failed_lookup_falls_back_without_writing_the_cache(cache_root: io::Result<TempDir>) {
-    let temp_dir = cache_root.expect("temp dir");
-    let cache_dir = utf8_path(&temp_dir).expect("cache dir");
+fn a_failed_lookup_falls_back_without_writing_the_cache(
+    cache_root: io::Result<(TempDir, Utf8PathBuf)>,
+) {
+    let (_guard, cache_dir) = cache_root.expect("cache root");
     let clock = DefaultClock;
     let github = StubGitHubClient::new(Reply::Failure);
 
@@ -253,8 +267,8 @@ fn a_failed_lookup_falls_back_without_writing_the_cache(cache_root: io::Result<T
     ));
     assert!(!exists(&pr_cache_path(
         &cache_dir,
-        BRANCH,
-        Utf8Path::new(PROJECT_DIR)
+        Utf8Path::new(PROJECT_DIR),
+        BRANCH
     )));
 }
 
@@ -289,9 +303,8 @@ fn an_unavailable_cache_directory_skips_every_cache_access() {
 }
 
 #[rstest]
-fn a_failed_cache_write_is_reported(cache_root: io::Result<TempDir>) {
-    let temp_dir = cache_root.expect("temp dir");
-    let cache_dir = utf8_path(&temp_dir).expect("cache dir");
+fn a_failed_cache_write_is_reported(cache_root: io::Result<(TempDir, Utf8PathBuf)>) {
+    let (_guard, cache_dir) = cache_root.expect("cache root");
     // A regular file cannot be a parent directory, so creating the entry's
     // parent fails and the write with it.
     let blocker = cache_dir.join("blocker");
@@ -349,9 +362,8 @@ fn a_skipped_write_records_its_reason() {
 }
 
 #[rstest]
-fn a_status_line_survives_every_probe_failing(cache_root: io::Result<TempDir>) {
-    let temp_dir = cache_root.expect("temp dir");
-    let project_dir = utf8_path(&temp_dir).expect("project dir");
+fn a_status_line_survives_every_probe_failing(cache_root: io::Result<(TempDir, Utf8PathBuf)>) {
+    let (_guard, project_dir) = cache_root.expect("cache root");
     let args = StatusArgs {
         project_dir: Some(project_dir),
         ..StatusArgs::default()
@@ -359,7 +371,7 @@ fn a_status_line_survives_every_probe_failing(cache_root: io::Result<TempDir>) {
     let clock = DefaultClock;
     let github = StubGitHubClient::new(Reply::Found("42"));
 
-    let report = build_status_report(&args, &FailingRunner, &clock, &github)
+    let report = build_status_report(&args, &failing_runner(), &clock, &github)
         .expect("a failing probe must not fail the command");
 
     // The rendered contract: a project segment and nothing that needs git,

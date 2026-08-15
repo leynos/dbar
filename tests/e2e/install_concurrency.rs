@@ -67,20 +67,16 @@ const RACER_TIMEOUT: Duration = Duration::from_secs(30);
 /// transaction, so the racers apply in some serial order; the assertions below
 /// pin the observable consequences of that ordering.
 #[test]
-#[expect(
-    clippy::panic_in_result_fn,
-    reason = "the test returns `Result` to propagate the fallible fixtures with `?`; assertions remain the idiomatic failure mechanism"
-)]
-fn concurrent_install_processes_leave_one_coherent_snippet() -> io::Result<()> {
-    let candidates = solo_outcomes()?;
+fn concurrent_install_processes_leave_one_coherent_snippet() {
+    let candidates = solo_outcomes().expect("derive the per-request candidate configs");
 
-    let temp_dir = TempDir::new()?;
-    let config = config_path(&temp_dir)?;
-    write_config(&config, &seeded_config())?;
+    let temp_dir = TempDir::new().expect("temp dir");
+    let config = config_path(&temp_dir).expect("config path");
+    write_config(&config, &seeded_config()).expect("seed the config");
 
-    run_racers(&config)?;
+    run_racers(&config).expect("race the install processes");
 
-    let final_config = read_config(&config)?;
+    let final_config = read_config(&config).expect("read the config the racers left");
     assert_single_block(&final_config, "the final config");
     assert!(
         candidates.contains(&final_config),
@@ -93,8 +89,11 @@ fn concurrent_install_processes_leave_one_coherent_snippet() -> io::Result<()> {
         backup.as_std_path().exists(),
         "every racer overwrites the seed, so a backup must have been written"
     );
-    assert_backup_is_a_racers_work(&read_config(&backup)?, &candidates, &final_config);
-    Ok(())
+    assert_backup_is_a_racers_work(
+        &read_config(&backup).expect("read the surviving backup"),
+        &candidates,
+        &final_config,
+    );
 }
 
 /// Assert the surviving backup records a racer's output, not the seed.
@@ -193,14 +192,13 @@ fn run_racers(config: &Utf8Path) -> io::Result<()> {
         .map(|request| spawn_racer(config, request))
         .partition(Result::is_ok);
     let mut children: Vec<Child> = spawned.into_iter().filter_map(Result::ok).collect();
-    let released = release_racers(&mut children);
+    release_racers(&mut children);
     // Wait on every racer that did start, whatever else went wrong, so none
     // outlives the test.
     let waited: Vec<io::Result<()>> = children.into_iter().map(wait_for_racer).collect();
     spawn_failures
         .into_iter()
         .collect::<io::Result<Vec<Child>>>()?;
-    released?;
     waited.into_iter().collect()
 }
 
@@ -211,18 +209,24 @@ fn run_racers(config: &Utf8Path) -> io::Result<()> {
 /// never contend. Each racer is instead parked in a shell reading its stdin,
 /// and closing all those pipes together starts every install within
 /// microseconds of the others.
-fn release_racers(children: &mut [Child]) -> io::Result<()> {
+///
+/// Closing the pipe is what frees a racer: the shell's `read` returns at end of
+/// file exactly as it would on a newline, and the `|| true` swallows its
+/// non-zero status. So one pass of closes releases every racer, and it cannot
+/// fail — there is nothing to write and nothing to report. The earlier
+/// write-then-close pair was strictly worse at the job: the first racer was
+/// freed by the first write while the last was still waiting for its own,
+/// staggering the very start the rendezvous exists to synchronize.
+fn release_racers(children: &mut [Child]) {
     use std::io::Write as _;
-
     for child in children.iter_mut() {
         if let Some(stdin) = child.stdin.as_mut() {
-            stdin.write_all(b"\n")?;
+            stdin.write_all(b"\n").ok();
         }
     }
     for child in children.iter_mut() {
         drop(child.stdin.take());
     }
-    Ok(())
 }
 
 /// Park a racer in a POSIX shell that waits on stdin, then `exec`s `dbar`.

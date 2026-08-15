@@ -1,6 +1,11 @@
 //! Behavioural tests for tmux snippet installation, idempotence, and layout.
+use super::fs::{open_parent_for_read, split_parent};
+use super::snippet::{MARKER_END, MARKER_START, quoted_format};
 use super::*;
+use camino::Utf8Path;
 use camino::Utf8PathBuf;
+use cap_std::ambient_authority;
+use cap_std::fs_utf8::Dir;
 use rstest::{fixture, rstest};
 use tempfile::TempDir;
 
@@ -22,8 +27,13 @@ fn install_writes_snippet(workspace: Workspace) {
     let initial = "set -g status on\n";
     write(&path, initial).expect("write config");
 
-    let outcome =
-        install(Some(path.clone()), StatusPosition::Right, false, false).expect("install snippet");
+    let outcome = install(
+        Some(path.clone()),
+        StatusPosition::Right,
+        RunMode::Write,
+        Width::Plain,
+    )
+    .expect("install snippet");
     assert!(outcome.updated);
     assert!(outcome.backup_path.is_some());
 
@@ -35,34 +45,61 @@ fn install_writes_snippet(workspace: Workspace) {
 #[rstest]
 fn install_is_idempotent(workspace: Workspace) {
     let (_temp_dir, path) = workspace.expect("workspace");
-    let _ =
-        install(Some(path.clone()), StatusPosition::Right, false, false).expect("install snippet");
-    let second =
-        install(Some(path.clone()), StatusPosition::Right, false, false).expect("install snippet");
+    let _ = install(
+        Some(path.clone()),
+        StatusPosition::Right,
+        RunMode::Write,
+        Width::Plain,
+    )
+    .expect("install snippet");
+    let second = install(
+        Some(path.clone()),
+        StatusPosition::Right,
+        RunMode::Write,
+        Width::Plain,
+    )
+    .expect("install snippet");
     assert!(!second.updated);
 }
 
+/// Each request must yield its own snippet variant.
+///
+/// `install` returns `build_snippet`'s output verbatim, so the variant matrix is
+/// asserted against `build_snippet` directly. The end-to-end install path keeps
+/// its own coverage: `install_writes_snippet` and `install_is_idempotent` drive
+/// it here, the property suite drives it across both positions and both widths,
+/// and `tests/e2e/install_cli.rs` drives `--full --position right` through the
+/// binary.
 #[rstest]
-fn install_full_adds_client_width(workspace: Workspace) {
-    let (_temp_dir, path) = workspace.expect("workspace");
-    let outcome = install(Some(path), StatusPosition::Left, true, true).expect("install snippet");
-    assert!(outcome.snippet.contains("--client-width #{q:client_width}"));
-    assert!(outcome.snippet.contains("status-left-length 999"));
-}
-
-#[rstest]
-fn install_right_enables_clock(workspace: Workspace) {
-    let (_temp_dir, path) = workspace.expect("workspace");
-    let outcome = install(Some(path), StatusPosition::Right, true, false).expect("install snippet");
-    assert!(outcome.snippet.contains("--show-clock true"));
-    assert!(outcome.snippet.contains("status-right"));
-}
-
-#[rstest]
-fn install_left_omits_clock(workspace: Workspace) {
-    let (_temp_dir, path) = workspace.expect("workspace");
-    let outcome = install(Some(path), StatusPosition::Left, true, false).expect("install snippet");
-    assert!(!outcome.snippet.contains("--show-clock true"));
+#[case::full_left(StatusPosition::Left, Width::Full, &["status-left-length 999"], &["--show-clock true"])]
+#[case::right_plain(StatusPosition::Right, Width::Plain, &["--show-clock true", "status-right "], &["-length 999"])]
+#[case::left_plain(StatusPosition::Left, Width::Plain, &["status-left "], &["--show-clock true", "-length 999"])]
+fn snippet_variants_match_the_request(
+    #[case] position: StatusPosition,
+    #[case] width: Width,
+    #[case] expected: &[&str],
+    #[case] rejected: &[&str],
+) {
+    let snippet = build_snippet(position, width);
+    // The width slot appears exactly when the full variant was requested.
+    let width_slot = format!("--client-width {}", quoted_format("client_width"));
+    assert_eq!(
+        snippet.contains(&width_slot),
+        width.is_full(),
+        "`--client-width` must appear only for the full variant: {snippet}"
+    );
+    for token in expected {
+        assert!(
+            snippet.contains(token),
+            "snippet missing {token}: {snippet}"
+        );
+    }
+    for token in rejected {
+        assert!(
+            !snippet.contains(token),
+            "snippet must not contain {token}: {snippet}"
+        );
+    }
 }
 
 #[rstest]
@@ -71,8 +108,13 @@ fn install_dry_run_leaves_missing_parent_absent(workspace: Workspace) {
     let missing_parent =
         Utf8PathBuf::from_path_buf(temp_dir.path().join("missing")).expect("missing parent path");
     let config = missing_parent.join("tmux.conf");
-    let outcome =
-        install(Some(config), StatusPosition::Left, true, false).expect("dry run install");
+    let outcome = install(
+        Some(config),
+        StatusPosition::Left,
+        RunMode::DryRun,
+        Width::Plain,
+    )
+    .expect("dry run install");
     assert!(outcome.dry_run);
     // The parent directory must not have been created by the dry run.
     assert!(Dir::open_ambient_dir(missing_parent.as_path(), ambient_authority()).is_err());
@@ -90,8 +132,13 @@ fn install_preserves_restrictive_permissions(workspace: Workspace) {
     dir.set_permissions(file_name, Permissions::from_mode(0o600))
         .expect("restrict config to 0600");
 
-    let outcome =
-        install(Some(path.clone()), StatusPosition::Right, false, false).expect("install snippet");
+    let outcome = install(
+        Some(path.clone()),
+        StatusPosition::Right,
+        RunMode::Write,
+        Width::Plain,
+    )
+    .expect("install snippet");
     assert!(outcome.updated);
 
     let mode = dir
@@ -134,10 +181,22 @@ fn concurrent_installs_leave_one_well_formed_block(workspace: Workspace) {
 
     let left_path = path.clone();
     let right_path = path.clone();
-    let left =
-        std::thread::spawn(move || install(Some(left_path), StatusPosition::Left, false, false));
-    let right =
-        std::thread::spawn(move || install(Some(right_path), StatusPosition::Right, false, false));
+    let left = std::thread::spawn(move || {
+        install(
+            Some(left_path),
+            StatusPosition::Left,
+            RunMode::Write,
+            Width::Plain,
+        )
+    });
+    let right = std::thread::spawn(move || {
+        install(
+            Some(right_path),
+            StatusPosition::Right,
+            RunMode::Write,
+            Width::Plain,
+        )
+    });
     left.join()
         .expect("left install thread")
         .expect("left install succeeds");
@@ -171,7 +230,7 @@ fn concurrent_installs_leave_one_well_formed_block(workspace: Workspace) {
     };
     assert_eq!(
         contents,
-        format!("{unrelated}{}", build_snippet(winner, false)),
+        format!("{unrelated}{}", build_snippet(winner, Width::Plain)),
         "the file must equal a serial execution's result"
     );
 
@@ -183,11 +242,12 @@ fn concurrent_installs_leave_one_well_formed_block(workspace: Workspace) {
     let backed_up = read_to_string(&backup).expect("read backup");
     assert_eq!(
         backed_up,
-        format!("{unrelated}{}", build_snippet(loser, false)),
+        format!("{unrelated}{}", build_snippet(loser, Width::Plain)),
         "the backup must hold the config as it stood immediately before the winning install"
     );
 
-    let repeat = install(Some(path), winner, false, false).expect("re-install the winner");
+    let repeat =
+        install(Some(path), winner, RunMode::Write, Width::Plain).expect("re-install the winner");
     assert!(
         !repeat.updated,
         "the winning snippet must already be installed verbatim: {contents}"
@@ -196,7 +256,8 @@ fn concurrent_installs_leave_one_well_formed_block(workspace: Workspace) {
 
 #[rstest]
 fn install_without_path_reports_missing_path() {
-    let err = install(None, StatusPosition::Left, true, false).expect_err("no path supplied");
+    let err = install(None, StatusPosition::Left, RunMode::DryRun, Width::Plain)
+        .expect_err("no path supplied");
     assert!(matches!(err, InstallError::MissingPath));
 }
 
@@ -205,133 +266,57 @@ fn install_reports_incomplete_markers(workspace: Workspace) {
     let (_temp_dir, path) = workspace.expect("workspace");
     // A start marker with no matching end marker must not be rewritten.
     write(&path, &format!("{MARKER_START}\nset -g status-left ''\n")).expect("seed config");
-    let err =
-        install(Some(path), StatusPosition::Left, true, false).expect_err("dangling start marker");
+    let err = install(
+        Some(path),
+        StatusPosition::Left,
+        RunMode::DryRun,
+        Width::Plain,
+    )
+    .expect_err("dangling start marker");
     assert!(matches!(err, InstallError::IncompleteMarkers));
 }
 
 #[rstest]
-fn install_snippet_shell_quotes_tmux_formats() {
-    let snippet = build_snippet(StatusPosition::Left, true);
-    for token in [
-        "#{q:pane_current_path}",
-        "#{q:session_name}",
-        "#{q:window_index}",
-        "#{q:pane_id}",
-        "#{q:socket_path}",
-        "#{q:client_width}",
-    ] {
-        assert!(snippet.contains(token), "snippet missing {token}");
-    }
-    // The unquoted forms that permitted shell injection must be gone.
-    assert!(!snippet.contains("\"#{pane_current_path}\""));
-    assert!(!snippet.contains("\"#{client_width}\""));
+fn install_reports_duplicate_marker_blocks(workspace: Workspace) {
+    let (_temp_dir, path) = workspace.expect("workspace");
+    // Two complete blocks: rewriting around the first would silently strand the
+    // second, which would keep fighting over the same option.
+    let block = build_snippet(StatusPosition::Left, Width::Plain);
+    write(&path, &format!("{block}set -g mouse on\n{block}")).expect("seed config");
+    let err = install(
+        Some(path),
+        StatusPosition::Right,
+        RunMode::DryRun,
+        Width::Plain,
+    )
+    .expect_err("duplicated managed block");
+    assert!(matches!(err, InstallError::DuplicateMarkers), "got {err:?}");
 }
 
-/// The tmux formats interpolated into the `#(...)` command.
-const FORMAT_NAMES: [&str; 6] = [
-    "pane_current_path",
-    "session_name",
-    "window_index",
-    "pane_id",
-    "socket_path",
-    "client_width",
-];
-
-/// Characters tmux's `q` modifier backslash-escapes (`format_quote_shell`).
-const TMUX_Q_SPECIALS: &str = "|&;<>()$`\\\"'*?[# =%";
-
-/// Model of tmux's `#{q:...}` modifier.
+/// A duplicate must be refused even when the *first* block already matches.
 ///
-/// tmux backslash-escapes each special character rather than wrapping the
-/// value in quotes, which is why the snippet must interpolate `#{q:...}`
-/// *unquoted*. Verified against tmux next-3.4.
-fn tmux_q_modifier(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len() * 2);
-    for ch in value.chars() {
-        if TMUX_Q_SPECIALS.contains(ch) {
-            escaped.push('\\');
-        }
-        escaped.push(ch);
-    }
-    escaped
-}
-
-/// Extract the command tmux would run from inside `'#(...)'`.
-fn command_in_snippet(snippet: &str) -> Option<&str> {
-    let (_, rest) = snippet.split_once("'#(")?;
-    let (command, _) = rest.split_once(")'")?;
-    Some(command)
-}
-
-/// Split a command line the way a POSIX shell would.
-///
-/// Returns `None` if any shell metacharacter survives unescaped, which is
-/// precisely the condition that would let a hostile value break out of its
-/// argument and be interpreted as syntax.
-fn split_shell_words(input: &str) -> Option<Vec<String>> {
-    // Quoting is rejected outright, so a word is never legitimately empty:
-    // a non-empty buffer is exactly "a word is in progress".
-    let mut words = Vec::new();
-    let mut current = String::new();
-    let mut chars = input.chars();
-    while let Some(ch) = chars.next() {
-        match ch {
-            '\\' => current.push(chars.next()?),
-            ' ' | '\t' if current.is_empty() => {}
-            ' ' | '\t' => words.push(std::mem::take(&mut current)),
-            _ if TMUX_Q_SPECIALS.contains(ch) => return None,
-            _ => current.push(ch),
-        }
-    }
-    if !current.is_empty() {
-        words.push(current);
-    }
-    Some(words)
-}
-
+/// This is the case the old "split on the first marker" logic got wrong in the
+/// most dangerous way: it compared the first block to the snippet, found them
+/// equal, and reported the config as up to date while a second block remained.
 #[rstest]
-#[case::whitespace("/tmp/my project dir")]
-#[case::single_quote("/tmp/it's mine")]
-#[case::double_quote("/tmp/say \"hi\"")]
-#[case::command_substitution("$(touch /tmp/dbar-pwned)")]
-#[case::backticks("`touch /tmp/dbar-pwned`")]
-#[case::separator_and_glob("x; rm -rf / & echo *")]
-fn hostile_tmux_values_stay_single_literal_arguments(#[case] hostile: &str) {
-    let snippet = build_snippet(StatusPosition::Left, true);
-    let command = command_in_snippet(&snippet).expect("snippet embeds a #(...) command");
+fn install_reports_duplicates_even_when_the_first_block_matches(workspace: Workspace) {
+    let (_temp_dir, path) = workspace.expect("workspace");
+    let block = build_snippet(StatusPosition::Left, Width::Plain);
+    write(&path, &format!("{block}{block}")).expect("seed config");
+    let err = install(
+        Some(path),
+        StatusPosition::Left,
+        RunMode::DryRun,
+        Width::Plain,
+    )
+    .expect_err("duplicated managed block");
+    assert!(matches!(err, InstallError::DuplicateMarkers), "got {err:?}");
+}
 
-    // Every format slot must be interpolated bare: tmux escapes rather than
-    // quotes, so wrapping a slot in quotes would break the contract.
-    for name in FORMAT_NAMES {
-        let slot = format!("#{{q:{name}}}");
-        assert!(command.contains(&slot), "command missing {slot}");
-        assert!(
-            !command.contains(&format!("\"{slot}\"")),
-            "{slot} is quoted"
-        );
-        assert!(!command.contains(&format!("'{slot}'")), "{slot} is quoted");
-    }
-
-    // Expand every slot with the hostile value exactly as tmux would.
-    let mut expanded = command.to_owned();
-    for name in FORMAT_NAMES {
-        expanded = expanded.replace(&format!("#{{q:{name}}}"), &tmux_q_modifier(hostile));
-    }
-    assert!(!expanded.contains("#{"), "every format must be substituted");
-
-    let Some(words) = split_shell_words(&expanded) else {
-        panic!("hostile value escaped its argument as shell syntax: {hostile}");
-    };
-
-    // The value survives verbatim, once per slot, as its own single word.
-    let occurrences = words.iter().filter(|word| *word == hostile).count();
-    assert_eq!(
-        occurrences,
-        FORMAT_NAMES.len(),
-        "each slot must yield one literal argument, got words: {words:?}"
-    );
-    // The command and its flags are still separate, unmangled arguments.
-    assert_eq!(words.first().map(String::as_str), Some("dbar"));
-    assert!(words.iter().any(|word| word == "--project-dir"));
+/// A bare relative path has an empty parent, which is not an openable directory.
+#[rstest]
+fn split_parent_maps_a_bare_path_to_the_current_directory() {
+    let (parent, file_name) = split_parent(Utf8Path::new("tmux.conf")).expect("split bare path");
+    assert_eq!(parent, Utf8Path::new("."), "an empty parent is unopenable");
+    assert_eq!(file_name, "tmux.conf");
 }

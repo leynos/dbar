@@ -50,34 +50,60 @@ pub fn env_lock() -> MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Restores the variables it captured when dropped.
+/// Holds the [`env_lock`] guard and restores the variables it captured.
 ///
-/// Hold the [`env_lock`] guard for at least as long as this one; the safety of
-/// every mutation below depends on that serialization.
+/// The lock is acquired by [`EnvGuard::set`] before any variable is read or
+/// mutated and released only when the guard drops, so a caller cannot lose
+/// isolation by forgetting to take it. The mutex is not reentrant, so a test
+/// must build exactly one guard: additional variables are layered on with
+/// [`EnvGuard::and`], which reuses the lock already held.
 pub struct EnvGuard {
     saved: Vec<(String, Option<OsString>)>,
+    /// Held for the guard's lifetime; every mutation below relies on it.
+    _lock: MutexGuard<'static, ()>,
 }
 
 impl EnvGuard {
-    /// Applies `pairs`, capturing each variable's previous value.
+    /// Takes the [`env_lock`], then applies `pairs`, capturing previous values.
     pub fn set(pairs: &[(&str, &str)]) -> Self {
-        let saved = pairs
-            .iter()
-            .map(|(key, _)| ((*key).to_owned(), std::env::var_os(key)))
-            .collect();
+        let lock = env_lock();
+        let mut guard = Self {
+            saved: Vec::new(),
+            _lock: lock,
+        };
+        guard.apply(pairs);
+        guard
+    }
+
+    /// Applies `pairs` too, under the lock this guard already holds.
+    ///
+    /// Calling [`EnvGuard::set`] a second time in one test would deadlock on
+    /// the non-reentrant mutex, so overlapping sets chain through this instead.
+    #[must_use]
+    pub fn and(mut self, pairs: &[(&str, &str)]) -> Self {
+        self.apply(pairs);
+        self
+    }
+
+    /// Records each key's current value, then writes the requested one.
+    fn apply(&mut self, pairs: &[(&str, &str)]) {
         for (key, value) in pairs {
-            // SAFETY: `env_lock` serializes every mutation through this module
-            // and the guard restores the previous value on drop.
+            self.saved.push(((*key).to_owned(), std::env::var_os(key)));
+            // SAFETY: the guard holds `env_lock`, which serializes every
+            // mutation through this module, and `Drop` restores the previous
+            // value.
             unsafe { std::env::set_var(key, value) };
         }
-        Self { saved }
     }
 }
 
 impl Drop for EnvGuard {
     fn drop(&mut self) {
-        for (key, value) in &self.saved {
-            // SAFETY: as above; the lock is still held by the test.
+        // Restored in reverse, so a key written twice (`HOME` is set by the
+        // isolating set and then redirected) ends at its original value rather
+        // than at the intermediate one.
+        for (key, value) in self.saved.iter().rev() {
+            // SAFETY: as above; the lock is held until this guard drops.
             match value {
                 Some(previous) => unsafe { std::env::set_var(key, previous) },
                 None => unsafe { std::env::remove_var(key) },

@@ -1,7 +1,5 @@
 //! Binary-level coverage for the `dbar install` subcommand.
 
-use std::io;
-
 use tempfile::TempDir;
 
 use super::install_support::{
@@ -33,16 +31,12 @@ fn install_dry_run_previews_without_writing() {
 /// rewrite the file and leave a backup behind, then asserts that the dry run
 /// does neither.
 #[test]
-#[expect(
-    clippy::panic_in_result_fn,
-    reason = "the test returns `Result` to propagate the fallible fixtures with `?`; assertions remain the idiomatic failure mechanism"
-)]
-fn install_dry_run_preserves_existing_config() -> io::Result<()> {
+fn install_dry_run_preserves_existing_config() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let config = config_path(&temp_dir)?;
+    let config = config_path(&temp_dir).expect("config path");
     let seed = seeded_config();
-    write_config(&config, &seed)?;
-    let before = read_config(&config)?;
+    write_config(&config, &seed).expect("seed the config");
+    let before = read_config(&config).expect("read the seeded config");
     assert_eq!(before, seed, "the seed must land verbatim");
 
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("dbar");
@@ -59,12 +53,11 @@ fn install_dry_run_preserves_existing_config() -> io::Result<()> {
     assert_previews_full_right_snippet(&String::from_utf8_lossy(&output));
 
     assert_eq!(
-        read_config(&config)?,
+        read_config(&config).expect("re-read the config after the dry run"),
         before,
         "a dry run must leave the existing config byte-identical"
     );
     assert_no_side_files(&config);
-    Ok(())
 }
 
 /// Assert the dry run previewed the requested variant, not the seeded block.

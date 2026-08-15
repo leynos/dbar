@@ -199,7 +199,7 @@ fn resolve_project_dir(args: &StatusArgs) -> Result<Utf8PathBuf, DbarError> {
 fn resolve_pr_number(context: &PrLookup<'_>) -> PrLookupReport {
     match cache::resolve_cache_dir(context.args.cache_dir.clone()) {
         Ok(dir) => {
-            let path = pr_cache_path(&dir, context.branch, context.project_dir);
+            let path = pr_cache_path(&dir, context.project_dir, context.branch);
             resolve_with_cache(context, &path)
         }
         Err(error) => resolve_without_cache(context, CacheOutcome::DirUnavailable(error)),

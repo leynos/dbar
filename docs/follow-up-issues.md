@@ -137,24 +137,19 @@ Suggested migration order, smallest and lowest-risk first:
 
 ### Context for telemetry
 
-There is currently no logging, tracing, or metrics anywhere in the crate;
-`Cargo.toml` lists no `tracing`, `log`, or metrics dependency, and the only
-diagnostic surface is the `Debug`/`Error` implementations on
-`command::CommandError`, `github::GitHubError`, `cache::CacheError`, and
-`install::InstallError`.
-
-Several failure paths are deliberately swallowed rather than surfaced:
-
-- `status::pr_number` discards cache-write failures with
-  `if let Err(_err) = cache::store_cached_value(...) {}`.
-- `status::pr_number` treats a failed GitHub lookup
-  (`Err(_err) => return pr_from_branch(context.branch)`) as silent fallback
-  to branch-name parsing.
-- `git::is_git_repo`, `git::git_branch`, `git::git_worktree_status`, and
-  `git::upstream_counts` all use `Ok(...) ... _ => default` patterns that
-  discard the underlying `command::CommandError`.
-- `tmux::resolve_context` discards the result of `runner.run(&spec)` via
-  `.ok()` in `query_tmux`.
+There is currently no logging, tracing, or metrics backend anywhere in the
+crate; `Cargo.toml` lists no `tracing`, `log`, or metrics dependency.
+Absorbed probe failures are already captured as typed values rather than
+discarded: `status::StatusReport` carries a `status::StatusDiagnostics` that
+collects `git::GitProbeFailure`s, `tmux::TmuxProbeFailure`s, and a
+`status::pr::PrLookupReport` (which itself records cache-directory,
+cache-read, GitHub-lookup, and cache-write failures).
+`status::StatusDiagnostics::describe_failures` renders every absorbed
+failure as a line of text, and `run_status` in `src/lib.rs` mirrors those
+lines to stderr when the `DBAR_DIAGNOSTICS` environment variable is set,
+leaving stdout untouched. What is still missing is a logging/tracing/metrics
+backend: there is no structured event stream, no bounded-cardinality
+counters, and no latency measurement around the external boundaries.
 
 `Cargo.toml`'s `[lints.clippy]` section denies both `print_stdout` and
 `print_stderr`, and `run_status` in `src/lib.rs` already carries an
@@ -167,13 +162,17 @@ which is dedicated to the rendered segment consumed by tmux's `#(...)`.
 
 ### Proposed instrumentation
 
-Add structured diagnostics at the boundaries where the crate already talks
-to external systems: `command::CommandRunner::run` (git/gh/tmux process
-execution), `github::GitHubClient::pr_number`, `git::git_status`,
-`tmux::resolve_context`, `cache::load_cached_value`/`store_cached_value`,
-and `install::install`. Diagnostics should be gated behind an opt-in mode so
-the default `dbar status` invocation, run every few seconds from tmux,
-carries no added overhead.
+Build on the typed diagnostics already collected at the boundaries where the
+crate talks to external systems (`command::CommandRunner::run`,
+`github::GitHubClient::pr_number`, `git::git_status`, `tmux::resolve_context`,
+`cache::load_cached_value`/`store_cached_value`, and `install::install`) by
+routing them through a logging/tracing backend, adding bounded-cardinality
+counters, and measuring latency around each boundary call. This is additive
+to `status::StatusDiagnostics::describe_failures` and the `DBAR_DIAGNOSTICS`
+opt-in text mirror described above, not a replacement for them; the new
+backend should be gated behind its own opt-in mode so the default `dbar
+status` invocation, run every few seconds from tmux, carries no added
+overhead.
 
 ### Acceptance criteria for telemetry
 
@@ -198,11 +197,13 @@ carries no added overhead.
    `command::RealCommandRunner::run`, `github::GhCliClient::pr_number`,
    `cache::load_cached_value`, `cache::store_cached_value`, and
    `install::install`'s filesystem operations.
-5. Cache-write failures currently discarded in `status::pr_number`
-   (`if let Err(_err) = cache::store_cached_value(...) {}`) and failed
-   GitHub lookups (`Err(_err) => return pr_from_branch(...)`) are recorded
-   as diagnostic events when diagnostics are enabled, without changing the
-   existing fallback behaviour on the non-diagnostic path.
+5. The failures already recorded by `status::StatusDiagnostics` (cache-write
+   failures via `status::pr::CacheWriteOutcome::Failed`, failed GitHub
+   lookups via `status::pr::PrResolution::LookupFailed`, and the `git` and
+   `tmux` probe failures) are also emitted as backend diagnostic events when
+   the new opt-in mode is enabled, without changing the existing
+   `DBAR_DIAGNOSTICS` text mirror or the fallback behaviour on the
+   non-diagnostic path.
 6. A benchmark or timed test demonstrates that enabling diagnostics adds no
    more than a small, explicitly stated overhead (for example, low
    single-digit milliseconds) to a representative `dbar status` run, and

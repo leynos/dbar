@@ -13,7 +13,9 @@
 //! exclusive `flock` on a sibling of the config path; sharing a path across
 //! cases would serialize them at best and deadlock the property at worst.
 
+use super::snippet::{MARKER_END, MARKER_START};
 use super::*;
+use camino::Utf8Path;
 use proptest::prelude::*;
 use tempfile::TempDir;
 
@@ -58,7 +60,7 @@ fn marker_block() -> impl Strategy<Value = Option<String>> {
     prop_oneof![
         3 => Just(None),
         3 => (any_position(), any::<bool>())
-            .prop_map(|(position, full)| Some(build_snippet(position, full))),
+            .prop_map(|(position, full)| Some(build_snippet(position, Width::from_full(full)))),
         1 => Just(Some(format!(
             "{MARKER_START}\nset -g status-left 'legacy'\n{MARKER_END}\n"
         ))),
@@ -99,8 +101,12 @@ impl ConfigShape {
         if self.trailing_newline {
             return out;
         }
-        out.strip_suffix('\n')
-            .map_or_else(|| out.clone(), str::to_owned)
+        // Drop the terminating newline in place; copying the string only to
+        // return the copy would clone the whole rendered config.
+        if out.ends_with('\n') {
+            out.pop();
+        }
+        out
     }
 }
 
@@ -252,11 +258,11 @@ proptest! {
         let Scenario { existing, present, position, full } = scenario;
         let (_temp_dir, path) = seeded_workspace(&existing, present)?;
 
-        let first = install(Some(path.clone()), position, false, full)
+        let first = install(Some(path.clone()), position, RunMode::Write, Width::from_full(full))
             .map_err(|err| TestCaseError::fail(format!("first install failed: {err}")))?;
         let after_first = read_back(&path);
 
-        let second = install(Some(path.clone()), position, false, full)
+        let second = install(Some(path.clone()), position, RunMode::Write, Width::from_full(full))
             .map_err(|err| TestCaseError::fail(format!("second install failed: {err}")))?;
         let after_second = read_back(&path);
 
@@ -285,11 +291,11 @@ proptest! {
         let (_sequential_dir, sequential) = seeded_workspace(&existing, present)?;
         let (_direct_dir, direct) = seeded_workspace(&existing, present)?;
 
-        install(Some(sequential.clone()), position, false, full)
+        install(Some(sequential.clone()), position, RunMode::Write, Width::from_full(full))
             .map_err(|err| TestCaseError::fail(format!("first install failed: {err}")))?;
-        let second = install(Some(sequential.clone()), next_position, false, next_full)
+        let second = install(Some(sequential.clone()), next_position, RunMode::Write, Width::from_full(next_full))
             .map_err(|err| TestCaseError::fail(format!("second install failed: {err}")))?;
-        let direct_outcome = install(Some(direct.clone()), next_position, false, next_full)
+        let direct_outcome = install(Some(direct.clone()), next_position, RunMode::Write, Width::from_full(next_full))
             .map_err(|err| TestCaseError::fail(format!("direct install failed: {err}")))?;
 
         let sequential_contents = read_back(&sequential);
@@ -305,7 +311,8 @@ proptest! {
         );
         prop_assert_eq!(
             second.updated,
-            build_snippet(position, full) != build_snippet(next_position, next_full),
+            build_snippet(position, Width::from_full(full))
+                != build_snippet(next_position, Width::from_full(next_full)),
             "update flag did not track whether the snippet changed"
         );
         prop_assert!(

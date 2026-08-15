@@ -19,7 +19,7 @@ pub use crate::error::DbarError;
 use crate::command::RealCommandRunner;
 use crate::config::DbarCommand;
 use crate::github::{GhCliClient, GitHubClient, MockGitHubClient};
-use mockable::DefaultClock;
+use mockable::{DefaultClock, DefaultEnv, Env};
 
 /// Run the dbar CLI and print the requested output.
 ///
@@ -37,8 +37,11 @@ use mockable::DefaultClock;
 /// Returns an error if configuration cannot be loaded, commands fail, or the
 /// tmux configuration cannot be updated.
 pub fn run() -> Result<(), DbarError> {
+    // Resolve every ambient input at this boundary so nothing below reads the
+    // process environment directly.
+    let diagnostics_enabled = diagnostics_enabled(&DefaultEnv::new());
     match config::load_command()? {
-        DbarCommand::Status(args) => run_status(&args),
+        DbarCommand::Status(args) => run_status(&args, diagnostics_enabled),
         DbarCommand::Install(args) => run_install(args),
     }
 }
@@ -51,9 +54,17 @@ pub fn run() -> Result<(), DbarError> {
 /// way, so the tmux contract is unchanged.
 const DIAGNOSTICS_ENV: &str = "DBAR_DIAGNOSTICS";
 
+/// Whether [`DIAGNOSTICS_ENV`] is set to any value in `env`.
+///
+/// Taking the environment as a trait object keeps the decision testable: the
+/// caller resolves it once and passes the answer down as a plain flag.
+fn diagnostics_enabled(env: &dyn Env) -> bool {
+    env.string(DIAGNOSTICS_ENV).is_some()
+}
+
 /// Render a status line segment and print it to stdout.
 #[expect(clippy::print_stdout, reason = "CLI output is the intended behaviour")]
-fn run_status(args: &config::StatusArgs) -> Result<(), DbarError> {
+fn run_status(args: &config::StatusArgs, diagnostics_enabled: bool) -> Result<(), DbarError> {
     let runner = RealCommandRunner;
     let clock = DefaultClock;
     let mock_client = args.github_mock_pr.as_deref().map(MockGitHubClient::new);
@@ -64,36 +75,48 @@ fn run_status(args: &config::StatusArgs) -> Result<(), DbarError> {
     };
     let report = status::build_status_report(args, &runner, &clock, github)?;
     println!("{}", report.line);
-    report_diagnostics(&report.diagnostics);
+    report_diagnostics(&report.diagnostics, diagnostics_enabled);
     Ok(())
 }
 
+/// The lines to mirror to stderr, which is none unless diagnostics are enabled.
+fn diagnostic_lines(diagnostics: &status::StatusDiagnostics, enabled: bool) -> Vec<String> {
+    if enabled {
+        diagnostics.describe_failures()
+    } else {
+        Vec::new()
+    }
+}
+
 /// Mirror absorbed probe failures to stderr when diagnostics are enabled.
+///
+/// stdout carries the status line and nothing else, so diagnostics never
+/// appear there regardless of the flag.
 #[expect(
     clippy::print_stderr,
     reason = "opt-in operator diagnostics for silently degraded probes"
 )]
-fn report_diagnostics(diagnostics: &status::StatusDiagnostics) {
-    if std::env::var_os(DIAGNOSTICS_ENV).is_none() {
-        return;
-    }
-    for failure in diagnostics.describe_failures() {
+fn report_diagnostics(diagnostics: &status::StatusDiagnostics, enabled: bool) {
+    for failure in diagnostic_lines(diagnostics, enabled) {
         eprintln!("dbar: {failure}");
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 /// Install the tmux snippet and report the outcome to stdout.
 fn run_install(args: config::InstallArgs) -> Result<(), DbarError> {
     // Both flags are tri-state so that an omitted flag cannot shadow the
     // environment or the configuration file; absence means the documented
     // default of `false`. Read before `path` is moved out of `args`.
-    let dry_run = args.is_dry_run();
-    let full = args.is_full();
+    let mode = install::RunMode::from_dry_run(args.is_dry_run());
+    let width = install::Width::from_full(args.is_full());
     let position = args.position.unwrap_or_default();
     let path = args
         .path
         .or_else(|| Some(config::default_tmux_config_path()));
-    let outcome = install::install(path, position, dry_run, full)?;
+    let outcome = install::install(path, position, mode, width)?;
     report_install_outcome(&outcome);
     Ok(())
 }

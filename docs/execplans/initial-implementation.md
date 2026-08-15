@@ -30,7 +30,7 @@ in tmux via `#(dbar)` and all specified tests pass.
   tags `#[...]` instead of ANSI escapes and using tmux formats (`#{...}`) or
   tmux queries to collect context.
 - Must include unit tests with `rstest`, behavioural tests with `rstest-bdd`,
-  and e2e snapshot tests with `assert-cmd` + `insta`.
+  and e2e snapshot tests with `assert_cmd` + `insta`.
 - Must use `cap_std` and `camino` in place of `std::fs` and `std::path`.
 - Must use the XDG cache directory (via the `directories` crate) for caching.
 - Every new module must start with a `//!` module-level doc comment and stay
@@ -186,11 +186,13 @@ post-rebase dependency set.
 
 ## Context and orientation
 
-The repository currently contains a single binary with a stub `main` in
-`src/main.rs`. There are no existing modules or tests. The aesthetic reference
-script `~/.local/bin/claude-status` defines glyphs, a 256-colour palette, and
-segment ordering; it also contains project naming and git parsing logic that
-must be mirrored. The tmux status line protocol and quoting guidance live in
+At the start of this work, the repository contained a single binary with a
+stub `main` in `src/main.rs` and no existing modules or tests; see
+`Interfaces and dependencies` for the modules and tests delivered instead. The
+aesthetic reference script `~/.local/bin/claude-status` defines glyphs, a
+256-colour palette, and segment ordering; it also contains project naming and
+git parsing logic that must be mirrored. The tmux status line protocol and
+quoting guidance live in
 `docs/tmux-statuslines-in-a-nutshell.md`. The configuration system should use
 `ortho_config` as documented in `docs/ortho-config-users-guide.md`. Behavioural
 test patterns are in `docs/rstest-bdd-users-guide.md`, and dependency-injection
@@ -347,10 +349,11 @@ Delivered internal interfaces:
   variants: `Cli(Box<clap::Error>)` for invalid command-line arguments and
   `Merge(Arc<ortho_config::OrthoError>)` for environment/config-file
   merge failures.
-- `status::build_status_line(args: &StatusArgs, runner: &dyn
+- `status::build_status_report(args: &StatusArgs, runner: &dyn
   CommandRunner, clock: &dyn Clock, github: &dyn GitHubClient) ->
-  Result<String, DbarError>`: assembles and returns the rendered status
-  line; there is no separate `StatusContext`/`StatusLine` type.
+  Result<StatusReport, DbarError>`: assembles and returns a `StatusReport`
+  holding the rendered `line` and a `StatusDiagnostics` value recording
+  every absorbed probe failure; there is no separate `StatusContext` type.
 - `command::CommandRunner`: trait executing a `CommandSpec` and
   returning a `CommandOutput`, implemented by `RealCommandRunner`. This
   seam was not anticipated in the original plan; `git`, `tmux`, and GitHub
@@ -359,9 +362,10 @@ Delivered internal interfaces:
   read branch, dirty/staged state, upstream counts, and worktree detection
   through a `&dyn CommandRunner`; there is no `GitProbe` trait.
 - `tmux::resolve_context(runner: &dyn CommandRunner, context:
-  TmuxContext) -> TmuxContext`: free function that fills in missing
-  session/window/pane/socket fields from `tmux display-message` output;
-  there is no `TmuxProbe` trait.
+  TmuxContext) -> TmuxResolution`: free function that fills in missing
+  session/window/pane/socket fields from `tmux display-message` output and
+  returns a `TmuxResolution` holding the resolved `context` and an
+  `outcome` recording what happened; there is no `TmuxProbe` trait.
 - `render::render_status_line(context: &RenderContext) -> String`:
   renderer that applies the `claude-status` palette and glyphs and emits
   tmux `#[fg=colourNN]`/`#[bg=colourNN]` styling.
