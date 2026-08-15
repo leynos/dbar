@@ -97,11 +97,12 @@ fn report_diagnostics_writes_only_when_enabled() {
     let mut loud = Vec::new();
     report_diagnostics(&mut loud, &diagnostics, true).expect("buffered write cannot fail");
     let text = String::from_utf8(loud).expect("diagnostics are utf8");
-    let expected: String = diagnostics
-        .describe_failures()
-        .iter()
-        .map(|failure| format!("dbar: {failure}\n"))
-        .collect();
+    let mut expected = String::new();
+    for failure in diagnostics.describe_failures() {
+        expected.push_str("dbar: ");
+        expected.push_str(&failure);
+        expected.push('\n');
+    }
     assert_eq!(text, expected);
 }
 
@@ -121,10 +122,7 @@ fn outcome(dry_run: bool, updated: bool, backup: Option<&str>) -> install::Insta
     outcome(true, false, None),
     "Dry run for /tmp/tmux.conf:\n# dbar: begin\n# dbar: end\n\n"
 )]
-#[case::updated(
-    outcome(false, true, None),
-    "Updated tmux config at /tmp/tmux.conf\n"
-)]
+#[case::updated(outcome(false, true, None), "Updated tmux config at /tmp/tmux.conf\n")]
 #[case::updated_with_backup(
     outcome(false, true, Some("/tmp/tmux.conf.bak")),
     "Updated tmux config at /tmp/tmux.conf\nBackup written to /tmp/tmux.conf.bak\n"
