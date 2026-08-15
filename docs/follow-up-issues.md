@@ -171,8 +171,8 @@ counters, and measuring latency around each boundary call. This is additive
 to `status::StatusDiagnostics::describe_failures` and the `DBAR_DIAGNOSTICS`
 opt-in text mirror described above, not a replacement for them; the new
 backend should be gated behind its own opt-in mode so the default `dbar
-status` invocation, run every few seconds from tmux, carries no added
-overhead.
+status` invocation, run every few seconds from tmux, stays within the
+latency budget stated in acceptance criterion 6 below.
 
 ### Acceptance criteria for telemetry
 

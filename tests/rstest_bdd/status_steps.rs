@@ -70,6 +70,11 @@ fn run_status(world: &mut World) {
         "--pane",
         "%0",
     ]);
+    // `dbar` runs git itself, so the same repository redirection variables that
+    // `run_git` clears would otherwise steer the probe away from the fixture.
+    cmd.env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE");
     let output = cmd.assert().success().get_output().stdout.clone();
     world.output = Some(String::from_utf8_lossy(&output).trim().to_owned());
 }
@@ -132,6 +137,12 @@ fn write_repo_file(world: &World, contents: &str) -> io::Result<()> {
 /// the like — and change what the steps observe. Pointing both configuration
 /// files at `/dev/null` and setting `GIT_CONFIG_NOSYSTEM` makes the repository
 /// depend only on the arguments passed here.
+///
+/// The repository redirection variables `GIT_DIR`, `GIT_WORK_TREE` and
+/// `GIT_INDEX_FILE` are cleared for the same reason. A suite run from inside a
+/// git hook or a `git rebase --exec` inherits them, and any one of them would
+/// silently point these commands at the developer's repository instead of the
+/// fixture — `current_dir` alone does not override them.
 fn run_git(world: &World, args: impl IntoIterator<Item = &'static str>) -> io::Result<()> {
     let git_args: Vec<&'static str> = args.into_iter().collect();
     let output = Command::new("git")
@@ -140,6 +151,9 @@ fn run_git(world: &World, args: impl IntoIterator<Item = &'static str>) -> io::R
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
         .output()?;
     if output.status.success() {
         Ok(())

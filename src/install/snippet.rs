@@ -93,6 +93,34 @@ pub(super) fn quoted_format(format: &str) -> String {
     format!("#{{s/{TMUX_CONTROL_CHARACTERS}/_/:#{{q:{format}}}}}")
 }
 
+/// Build the managed block that binds `dbar status` to a tmux status option.
+///
+/// The block sets `status-left` or `status-right` (per `position`) to a
+/// `#(...)` command of the form:
+///
+/// ```text
+/// dbar status --project-dir <pane_current_path> --session <session_name> \
+///     --window <window_index> --pane <pane_id> --socket <socket_path> \
+///     [--show-clock true] [--client-width <client_width>]
+/// ```
+///
+/// Every value is a tmux format interpolated through [`quoted_format`], so the
+/// arguments are resolved by tmux at render time rather than frozen at install
+/// time. The five leading flags are unconditional and always appear in that
+/// order; the CLI parses them by name, so the order is a readability contract
+/// rather than a positional one.
+///
+/// `--show-clock true` is emitted only for [`StatusPosition::Right`]. The clock
+/// is right-aligned against the end of the status line, which only the
+/// right-hand segment owns; adding it on the left would plant a clock in the
+/// middle of the bar, so the left variant leaves the flag off and takes the
+/// CLI's default.
+///
+/// `--client-width` is emitted only for [`Width::Full`], the variant that also
+/// raises `{target}-length` to 999 so the segment may claim the whole bar. Only
+/// then does the renderer need the client's width to know how much room it has;
+/// the plain variant is bounded by tmux's own length cap instead, and passing a
+/// width there would invite it to render past that limit and be truncated.
 pub(super) fn build_snippet(position: StatusPosition, width: Width) -> String {
     let target = match position {
         StatusPosition::Left => "status-left",

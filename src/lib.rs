@@ -16,6 +16,8 @@ mod types;
 
 pub use crate::error::DbarError;
 
+use std::io::{self, Write};
+
 use crate::command::RealCommandRunner;
 use crate::config::DbarCommand;
 use crate::github::{GhCliClient, GitHubClient, MockGitHubClient};
@@ -62,8 +64,34 @@ fn diagnostics_enabled(env: &dyn Env) -> bool {
     env.string(DIAGNOSTICS_ENV).is_some()
 }
 
+/// Write one line to `writer`, treating a closed pipe as a completed write.
+///
+/// `dbar status` is re-run on every tmux status refresh with stdout attached to
+/// a pipe tmux is free to close the moment it has what it needs, so losing that
+/// race is routine rather than a fault. A [`io::ErrorKind::BrokenPipe`] is
+/// therefore reported as success: the alternative is a non-zero exit and an
+/// error message for an event in which nothing actually went wrong. Every other
+/// kind still propagates, so a genuinely failed write is not swallowed.
+fn write_line(writer: &mut impl Write, line: &str) -> io::Result<()> {
+    match writeln!(writer, "{line}") {
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        result => result,
+    }
+}
+
+/// Flush `writer`, treating a closed pipe as a completed flush.
+///
+/// Buffered output can defer the write failure to the flush, so the same
+/// tolerance [`write_line`] applies has to hold here or the broken pipe simply
+/// resurfaces one call later.
+fn flush_writer(writer: &mut impl Write) -> io::Result<()> {
+    match writer.flush() {
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        result => result,
+    }
+}
+
 /// Render a status line segment and print it to stdout.
-#[expect(clippy::print_stdout, reason = "CLI output is the intended behaviour")]
 fn run_status(args: &config::StatusArgs, diagnostics_enabled: bool) -> Result<(), DbarError> {
     let runner = RealCommandRunner;
     let clock = DefaultClock;
@@ -74,8 +102,10 @@ fn run_status(args: &config::StatusArgs, diagnostics_enabled: bool) -> Result<()
         None => &gh_client,
     };
     let report = status::build_status_report(args, &runner, &clock, github)?;
-    println!("{}", report.line);
-    report_diagnostics(&report.diagnostics, diagnostics_enabled);
+    let mut stdout = io::stdout();
+    write_line(&mut stdout, &report.line)?;
+    flush_writer(&mut stdout)?;
+    report_diagnostics(&mut io::stderr(), &report.diagnostics, diagnostics_enabled)?;
     Ok(())
 }
 
@@ -91,15 +121,22 @@ fn diagnostic_lines(diagnostics: &status::StatusDiagnostics, enabled: bool) -> V
 /// Mirror absorbed probe failures to stderr when diagnostics are enabled.
 ///
 /// stdout carries the status line and nothing else, so diagnostics never
-/// appear there regardless of the flag.
-#[expect(
-    clippy::print_stderr,
-    reason = "opt-in operator diagnostics for silently degraded probes"
-)]
-fn report_diagnostics(diagnostics: &status::StatusDiagnostics, enabled: bool) {
+/// appear there regardless of the flag; `writer` is stderr in the CLI and a
+/// buffer under test.
+///
+/// # Errors
+///
+/// Returns an error if writing to `writer` fails for any reason other than a
+/// closed pipe.
+fn report_diagnostics(
+    writer: &mut impl Write,
+    diagnostics: &status::StatusDiagnostics,
+    enabled: bool,
+) -> io::Result<()> {
     for failure in diagnostic_lines(diagnostics, enabled) {
-        eprintln!("dbar: {failure}");
+        write_line(writer, &format!("dbar: {failure}"))?;
     }
+    flush_writer(writer)
 }
 
 #[cfg(test)]
@@ -117,22 +154,33 @@ fn run_install(args: config::InstallArgs) -> Result<(), DbarError> {
         .path
         .or_else(|| Some(config::default_tmux_config_path()));
     let outcome = install::install(path, position, mode, width)?;
-    report_install_outcome(&outcome);
+    report_install_outcome(&mut io::stdout(), &outcome)?;
     Ok(())
 }
 
-/// Print the result of an install run to stdout.
-#[expect(clippy::print_stdout, reason = "CLI output is the intended behaviour")]
-fn report_install_outcome(outcome: &install::InstallOutcome) {
+/// Print the result of an install run to `writer`, which is stdout in the CLI.
+///
+/// # Errors
+///
+/// Returns an error if writing to `writer` fails for any reason other than a
+/// closed pipe.
+fn report_install_outcome(
+    writer: &mut impl Write,
+    outcome: &install::InstallOutcome,
+) -> io::Result<()> {
     if outcome.dry_run {
-        println!("Dry run for {}:", outcome.path);
-        println!("{}", outcome.snippet);
+        write_line(writer, &format!("Dry run for {}:", outcome.path))?;
+        write_line(writer, &outcome.snippet)?;
     } else if outcome.updated {
-        println!("Updated tmux config at {}", outcome.path);
-        if let Some(backup) = &outcome.backup_path {
-            println!("Backup written to {backup}");
+        write_line(writer, &format!("Updated tmux config at {}", outcome.path))?;
+        if let Some(backup) = outcome.backup_path.as_ref() {
+            write_line(writer, &format!("Backup written to {backup}"))?;
         }
     } else {
-        println!("tmux config already up to date at {}", outcome.path);
+        write_line(
+            writer,
+            &format!("tmux config already up to date at {}", outcome.path),
+        )?;
     }
+    flush_writer(writer)
 }

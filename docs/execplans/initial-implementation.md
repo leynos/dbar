@@ -345,10 +345,11 @@ Delivered internal interfaces:
   `github_mock_pr`, `pr_cache_ttl_seconds`, and `cache_dir` (status), and
   `path`, `dry_run`, `full`, and `position` (install).
   `config::load_command() -> Result<DbarCommand, ConfigError>`
-  parses and merges the selected subcommand, where `ConfigError` has two
-  variants: `Cli(Box<clap::Error>)` for invalid command-line arguments and
+  parses and merges the selected subcommand, where `ConfigError` has three
+  variants: `Cli(Box<clap::Error>)` for invalid command-line arguments,
   `Merge(Arc<ortho_config::OrthoError>)` for environment/config-file
-  merge failures.
+  merge failures, and `InvalidClockFormat(String)` for a `clock_format`
+  value chrono cannot render.
 - `status::build_status_report(args: &StatusArgs, runner: &dyn
   CommandRunner, clock: &dyn Clock, github: &dyn GitHubClient) ->
   Result<StatusReport, DbarError>`: assembles and returns a `StatusReport`
@@ -370,10 +371,14 @@ Delivered internal interfaces:
   renderer that applies the `claude-status` palette and glyphs and emits
   tmux `#[fg=colourNN]`/`#[bg=colourNN]` styling.
 - `install::install(path: Option<Utf8PathBuf>, position:
-  StatusPosition, dry_run: bool, full: bool) -> Result<InstallOutcome,
+  StatusPosition, mode: RunMode, width: Width) -> Result<InstallOutcome,
   InstallError>`: free function that writes a marker-delimited tmux
   snippet and returns a summary of changes; there is no `TmuxInstaller`
-  type.
+  type. `RunMode` (`DryRun`/`Write`) and `Width` (`Full`/`Plain`) replaced
+  the originally planned `dry_run: bool, full: bool` pair, because two
+  adjacent booleans of the same type can be transposed without the
+  compiler noticing, and transposing these two would turn a preview into a
+  write of the wrong variant.
 - `cache::{resolve_cache_dir, load_cached_value,
   store_cached_value}`: helpers that resolve the XDG cache path and manage
   cached lookup files, as planned.
