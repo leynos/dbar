@@ -23,8 +23,13 @@ from `run()` based on the parsed `DbarCommand`.
   below.
 - `git/mod.rs` — free functions `project_name` and `git_status` that run
   `git` probes (in `git/probes.rs`) through a `&dyn CommandRunner`.
-  `project_name` returns a `ProjectName` directly, since it is a chain of
-  heuristics with no failure to report. `git_status` returns a
+  `project_name` returns a `ProjectNameOutcome`, pairing the resolved
+  `ProjectName` with the `GitProbeFailure` the fallback absorbed, if any: the
+  heuristics yield the same name whether the origin probe answered or could
+  not be run, so without the outcome the two are indistinguishable. A non-zero
+  exit is git *answering* — it is how `git remote get-url origin` reports no
+  such remote — so only an unrunnable probe is recorded as a degradation.
+  `git_status` returns a
   `GitStatusOutcome` — `Available(GitStatusReport)`, `NotARepository`, or
   `Unavailable(GitProbeFailure)` — so a caller can tell a missing repository
   apart from a failed or unparsable probe; `GitStatusReport` carries the
