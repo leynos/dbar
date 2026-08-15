@@ -202,21 +202,28 @@ fn run_racers(config: &Utf8Path) -> io::Result<()> {
     waited.into_iter().collect()
 }
 
-/// Release every parked racer at once.
+/// Release every parked racer as tightly as the platform allows.
 ///
 /// Spawn order alone is not a race: forking a debug binary costs milliseconds
 /// and an install costs less, so racers started in a loop simply queue up and
 /// never contend. Each racer is instead parked in a shell reading its stdin,
-/// and closing all those pipes together starts every install within
-/// microseconds of the others.
+/// and this releases them all before any of them can finish.
 ///
-/// Closing the pipe is what frees a racer: the shell's `read` returns at end of
-/// file exactly as it would on a newline, and the `|| true` swallows its
-/// non-zero status. So one pass of closes releases every racer, and it cannot
-/// fail — there is nothing to write and nothing to report. The earlier
-/// write-then-close pair was strictly worse at the job: the first racer was
-/// freed by the first write while the last was still waiting for its own,
-/// staggering the very start the rendezvous exists to synchronize.
+/// Either a byte or an end of file frees the shell's `read`, so closing the
+/// pipes alone would be enough to *start* every racer, and is the tidier
+/// spelling. It is nonetheless not what this does, because it measurably stops
+/// the test working. With `acquire_lock` disabled, the close-only form passed
+/// ten runs out of ten — detecting nothing on a build with no locking at all —
+/// where writing first and then closing failed the run in 4 of 10, and 5 of 5
+/// in a later measurement. Releasing each racer as its byte lands bunches the
+/// twelve processes tightly enough that they overlap inside the
+/// read-modify-write window; releasing them as the drops are scheduled does
+/// not, and they stagger past each other instead.
+///
+/// So the write is load-bearing and must stay, even though the pass that
+/// follows it would suffice on its own. Neither pass is truly simultaneous;
+/// the write is simply the tighter of the two. A failed write is harmless and
+/// is deliberately ignored: the close behind it still delivers the end of file.
 fn release_racers(children: &mut [Child]) {
     use std::io::Write as _;
     for child in children.iter_mut() {
