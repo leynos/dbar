@@ -172,7 +172,7 @@ to `status::StatusDiagnostics::describe_failures` and the `DBAR_DIAGNOSTICS`
 opt-in text mirror described above, not a replacement for them; the new
 backend should be gated behind its own opt-in mode so the default `dbar
 status` invocation, run every few seconds from tmux, stays within the
-latency budget stated in acceptance criterion 6 below.
+latency budget stated in acceptance criterion 7 below.
 
 ### Acceptance criteria for telemetry
 
@@ -197,23 +197,38 @@ latency budget stated in acceptance criterion 6 below.
    `command::RealCommandRunner::run`, `github::GhCliClient::pr_number`,
    `cache::load_cached_value`, `cache::store_cached_value`, and
    `install::install`'s filesystem operations.
-5. The failures already recorded by `status::StatusDiagnostics` (cache-write
-   failures via `status::pr::CacheWriteOutcome::Failed`, failed GitHub
-   lookups via `status::pr::PrResolution::LookupFailed`, and the `git` and
-   `tmux` probe failures) are also emitted as backend diagnostic events when
-   the new opt-in mode is enabled, without changing the existing
-   `DBAR_DIAGNOSTICS` text mirror or the fallback behaviour on the
+5. The failures already recorded by `status::StatusDiagnostics`
+   (cache-directory failures via `status::pr::CacheOutcome::DirUnavailable`,
+   cache-read failures via `status::pr::CacheOutcome::ReadFailed`,
+   cache-write failures via `status::pr::CacheWriteOutcome::Failed`, failed
+   GitHub lookups via `status::pr::PrResolution::LookupFailed`, and the
+   `git` and `tmux` probe failures) are also emitted as backend diagnostic
+   events when the new opt-in mode is enabled, without changing the
+   existing `DBAR_DIAGNOSTICS` text mirror or the fallback behaviour on the
    non-diagnostic path.
-6. A benchmark or timed test demonstrates that enabling diagnostics adds no
-   more than a small, explicitly stated overhead (for example, low
-   single-digit milliseconds) to a representative `dbar status` run, and
-   that the default (diagnostics disabled) path shows no measurable
-   regression against the current baseline.
-7. Diagnostic instrumentation does not introduce new `unwrap`, `expect`, or
+6. Each diagnostic event carries only an explicitly allowed set of fields
+   (for example, program name, outcome kind, and latency). Command
+   arguments, environment-derived values, GitHub identifiers, error text,
+   secrets, branch names, and project paths are excluded or redacted before
+   emission. This extends the redaction already applied in
+   `github::command_failure_category`, which reports only a `CommandError`
+   failure category rather than `CommandError::NonZero`'s verbatim
+   `stderr`, because `gh`'s stderr can embed a credential in the
+   `https://x-access-token:<token>@github.com/...` form.
+7. A benchmark or timed test compares the median wall-clock time of at
+   least 20 samples of a representative workload — one `dbar status`
+   invocation in a clean git repository with a warm PR cache (a fresh,
+   unexpired cache entry, so no `gh` lookup occurs) — run once with the new
+   opt-in diagnostics mode enabled and once with it disabled. The
+   diagnostics-enabled median must not exceed the diagnostics-disabled
+   median by more than 5 ms, a budget set because tmux re-runs this
+   invocation every few seconds via `status-interval` and a five-millisecond
+   addition is imperceptible against that cadence.
+8. Diagnostic instrumentation does not introduce new `unwrap`, `expect`, or
    `panic!` paths, in line with the crate's existing
    `clippy::unwrap_used`/`clippy::expect_used`/`clippy::panic_in_result_fn`
    deny lints.
-8. Existing `CommandError`, `GitHubError`, `CacheError`, and `InstallError`
+9. Existing `CommandError`, `GitHubError`, `CacheError`, and `InstallError`
    variants and their `Display` messages are unchanged, so this work adds
    an observability layer without altering the crate's existing error
    contracts.

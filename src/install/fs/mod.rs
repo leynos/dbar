@@ -110,12 +110,53 @@ fn try_lock_exclusive(_file: &File) -> Result<bool, InstallError> {
     Ok(true)
 }
 
+/// The largest tmux configuration the installer will read.
+///
+/// The whole config is held in memory, edited, and written back, so an
+/// unbounded read is an unbounded allocation. The cap is deliberately generous
+/// rather than tight: this is the user's own file, read only on an explicit
+/// `dbar install`, and refusing a large-but-legitimate config would be a
+/// regression. The largest configs in the wild — generated ones, or
+/// `oh-my-tmux` and friends with their comments intact — are a few hundred
+/// kilobytes, so 8 MiB is roughly an order of magnitude beyond anything a
+/// person has written while still bounding the damage a runaway or hostile
+/// file can do. Exceeding it is refused outright: silently truncating a config
+/// and then rewriting it would destroy the user's data.
+const MAX_CONFIG_BYTES: usize = 8 * 1024 * 1024;
+
 pub(super) fn read_to_string(path: &Utf8Path) -> Result<String, InstallError> {
     // Reads must never create directories: a missing parent surfaces as a
     // `NotFound` error that the caller treats as "no existing config", so a
     // `--dry-run` never mutates the filesystem.
     let (dir, file_name) = open_parent_for_read(path)?;
-    Ok(dir.read_to_string(file_name)?)
+    read_bounded(&dir, file_name)
+}
+
+/// Read `dir/name`, refusing anything past [`MAX_CONFIG_BYTES`].
+///
+/// One byte beyond the ceiling is read so that overrunning the limit is
+/// distinguishable from exactly reaching it, matching the shape of
+/// `command::spawn_reader`. An overrun is reported as an
+/// [`io::ErrorKind::FileTooLarge`] error, which the caller's `NotFound` arm
+/// deliberately does not absorb: an oversized config must fail the install
+/// rather than be mistaken for an absent one and overwritten.
+fn read_bounded(dir: &Dir, name: &str) -> Result<String, InstallError> {
+    use std::io::Read as _;
+
+    let file = dir.open(name)?;
+    let ceiling = u64::try_from(MAX_CONFIG_BYTES)
+        .map_err(|_| io::Error::other("config size limit does not fit in a byte count"))?;
+    let mut buffer = Vec::new();
+    file.take(ceiling + 1).read_to_end(&mut buffer)?;
+    if buffer.len() > MAX_CONFIG_BYTES {
+        drop(buffer);
+        return Err(InstallError::Io(io::Error::new(
+            io::ErrorKind::FileTooLarge,
+            format!("tmux config exceeds the {MAX_CONFIG_BYTES}-byte read limit"),
+        )));
+    }
+    String::from_utf8(buffer)
+        .map_err(|err| InstallError::Io(io::Error::new(io::ErrorKind::InvalidData, err)))
 }
 
 pub(super) fn write(path: &Utf8Path, contents: &str) -> Result<(), InstallError> {
@@ -237,3 +278,6 @@ pub(super) fn open_parent_for_write(path: &Utf8Path) -> Result<(Dir, &str), Inst
     let dir = Dir::open_ambient_dir(parent, ambient_authority())?;
     Ok((dir, file_name))
 }
+
+#[cfg(test)]
+mod tests;

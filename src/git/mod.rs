@@ -14,11 +14,13 @@
 //! | --- | --- |
 //! | Not a repository ([`GitStatusOutcome::NotARepository`]) | no git segment |
 //! | Repository probe failed or was unparseable ([`GitStatusOutcome::Unavailable`]) | no git segment |
-//! | Branch probe failed | branch reads `detached` |
-//! | Branch probe returned an empty name (a genuinely detached `HEAD`) | branch reads `detached`, no degradation recorded |
+//! | Branch probe failed | no branch, so the renderer prints `detached` |
+//! | Branch probe returned an empty name (a genuinely detached `HEAD`) | no branch, so the renderer prints `detached`; no degradation recorded |
 //! | Worktree-status probe failed | neither dirty nor staged |
 //! | A porcelain line was too short to classify | that line is ignored; the rest still count |
 //! | Upstream-count probe failed or was unparseable | ahead and behind both read zero |
+//! | Origin-URL probe exited non-zero (git's answer for "no `origin` remote", including in a plain directory) | the path-derived project name; no degradation recorded |
+//! | Origin-URL probe could not be run at all, or answered with a URL naming nothing | the path-derived project name, with the failure recorded on [`ProjectNameOutcome`] |
 
 use std::fmt;
 
@@ -30,15 +32,23 @@ use crate::types::{AheadCount, BehindCount, BranchName, ProjectName};
 
 mod probes;
 
+#[cfg(test)]
+use probes::git_command;
 use probes::{
-    git_command, probe_branch, probe_repository, probe_upstream_counts, probe_worktree_status,
+    probe_branch, probe_origin_name, probe_repository, probe_upstream_counts, probe_worktree_status,
 };
 
 #[derive(Debug, Clone)]
 /// Snapshot of git status metadata for rendering.
 pub struct GitStatus {
-    /// The current branch name.
-    pub branch: BranchName,
+    /// The current branch, or `None` when `HEAD` is detached.
+    ///
+    /// `None` is not a fallback: git reports no current branch both for a
+    /// detached `HEAD` and when the branch probe failed, and the renderer —
+    /// not this module — decides what label stands in for it. Keeping it
+    /// absent stops a synthetic name reaching the PR lookup or the cache key,
+    /// where a real branch called `detached` would be indistinguishable.
+    pub branch: Option<BranchName>,
     /// Whether the worktree has unstaged changes.
     pub dirty: bool,
     /// Whether the index contains staged changes.
@@ -62,6 +72,8 @@ pub enum GitProbe {
     WorktreeStatus,
     /// `git rev-list --left-right --count @{upstream}...HEAD`.
     UpstreamCounts,
+    /// `git remote get-url origin`.
+    OriginUrl,
 }
 
 impl GitProbe {
@@ -72,6 +84,7 @@ impl GitProbe {
             Self::Branch => "branch --show-current",
             Self::WorktreeStatus => "status --porcelain",
             Self::UpstreamCounts => "rev-list --left-right --count @{upstream}...HEAD",
+            Self::OriginUrl => "remote get-url origin",
         }
     }
 }
@@ -163,13 +176,46 @@ impl GitStatusOutcome {
     }
 }
 
+#[derive(Debug)]
+/// A resolved project name together with any failure absorbed to reach it.
+///
+/// Most of the fallback chain is *heuristic* rather than degraded: a
+/// repository with no `origin` remote, or a plain directory, is an ordinary
+/// case that git answers with a non-zero exit, and the path-derived name is
+/// the intended answer. What this type makes visible is the case that is not
+/// ordinary — git could not be run at all, or answered with a URL naming
+/// nothing — which was previously indistinguishable from a clean answer.
+pub struct ProjectNameOutcome {
+    /// The name to render.
+    pub name: ProjectName,
+    /// The failure the fallback absorbed, if the probe genuinely failed.
+    pub failure: Option<GitProbeFailure>,
+}
+
+impl ProjectNameOutcome {
+    /// Consume the outcome, returning every failure it recorded.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use camino::Utf8Path;
+    /// use dbar::command::RealCommandRunner;
+    /// use dbar::git::project_name;
+    ///
+    /// let runner = RealCommandRunner::default();
+    /// let outcome = project_name(&runner, Utf8Path::new("."));
+    /// let _ = outcome.into_failures();
+    /// ```
+    pub fn into_failures(self) -> Vec<GitProbeFailure> {
+        self.failure.into_iter().collect()
+    }
+}
+
 /// Resolve the project name using git metadata and directory heuristics.
 ///
-/// Unlike [`git_status`], this is a chain of *heuristics*, not a chain of
-/// fallbacks after a failure: a directory with no `origin` remote (or no
-/// repository at all) is an ordinary case, and the path-derived name is the
-/// intended answer rather than a degraded one. There is nothing to report,
-/// so this function keeps its infallible signature.
+/// The module-level fallback policy describes which failures are recorded.
+/// The rendered name is unchanged by any of them: the heuristics run in the
+/// same order and produce the same answer as before.
 ///
 /// # Examples
 ///
@@ -179,22 +225,19 @@ impl GitStatusOutcome {
 /// use dbar::git::project_name;
 ///
 /// let runner = RealCommandRunner::default();
-/// let name = project_name(&runner, Utf8Path::new("."));
-/// println!("{name}");
+/// let outcome = project_name(&runner, Utf8Path::new("."));
+/// println!("{}", outcome.name);
 /// ```
-pub fn project_name(runner: &dyn CommandRunner, project_dir: &Utf8Path) -> ProjectName {
-    let origin = git_command(project_dir, ["remote", "get-url", "origin"]);
-    if let Ok(output) = runner.run(&origin)
-        && let Some(name) = parse_origin_name(&output.stdout)
-    {
-        return name;
+pub fn project_name(runner: &dyn CommandRunner, project_dir: &Utf8Path) -> ProjectNameOutcome {
+    let origin = probe_origin_name(runner, project_dir);
+    let name = origin
+        .value
+        .or_else(|| name_from_worktree_path(project_dir))
+        .unwrap_or_else(|| ProjectName::new(project_dir.file_name().unwrap_or_default()));
+    ProjectNameOutcome {
+        name,
+        failure: origin.failure,
     }
-
-    if let Some(name) = name_from_worktree_path(project_dir) {
-        return name;
-    }
-
-    ProjectName::new(project_dir.file_name().unwrap_or_default())
 }
 
 /// Load git status information for the given project directory.
@@ -243,17 +286,6 @@ fn collect_status(runner: &dyn CommandRunner, project_dir: &Utf8Path) -> GitStat
             is_worktree: is_worktree_path(project_dir),
         },
         degradations,
-    }
-}
-
-fn parse_origin_name(origin: &str) -> Option<ProjectName> {
-    let trimmed = origin.trim();
-    let name = trimmed.rsplit(&['/', ':'][..]).next()?;
-    let cleaned = name.trim_end_matches(".git");
-    if cleaned.is_empty() {
-        None
-    } else {
-        Some(ProjectName::new(cleaned.to_owned()))
     }
 }
 

@@ -21,7 +21,7 @@ fn tmux_context() -> TmuxContext {
 fn render_includes_branch_and_pr(tmux_context: TmuxContext) {
     let project = ProjectName::new("demo");
     let status = GitStatus {
-        branch: BranchName::new("main"),
+        branch: Some(BranchName::new("main")),
         dirty: false,
         staged: false,
         ahead: AheadCount::new(0),
@@ -40,6 +40,32 @@ fn render_includes_branch_and_pr(tmux_context: TmuxContext) {
     let line = render_status_line(&context);
     assert!(line.contains("main"));
     assert!(line.contains("#17"));
+}
+
+#[rstest]
+fn render_labels_an_absent_branch_as_detached(tmux_context: TmuxContext) {
+    let project = ProjectName::new("demo");
+    let status = GitStatus {
+        branch: None,
+        dirty: false,
+        staged: false,
+        ahead: AheadCount::new(0),
+        behind: BehindCount::new(0),
+        is_worktree: false,
+    };
+    let context = RenderContext {
+        project: &project,
+        git_status: Some(&status),
+        pr_number: None,
+        tmux: Some(&tmux_context),
+        clock: None,
+        client_width: None,
+    };
+    let line = render_status_line(&context);
+    // The rendered contract is unchanged: a detached HEAD still draws the
+    // branch glyph followed by the literal label.
+    assert!(line.contains(GLYPH_BRANCH));
+    assert!(line.contains("detached"));
 }
 
 #[test]
@@ -257,7 +283,7 @@ impl DynamicValues {
 fn render_dynamic(values: &DynamicValues) -> String {
     let project = ProjectName::new(values.project.clone());
     let status = GitStatus {
-        branch: BranchName::new(values.branch.clone()),
+        branch: Some(BranchName::new(values.branch.clone())),
         dirty: false,
         staged: false,
         ahead: AheadCount::new(0),

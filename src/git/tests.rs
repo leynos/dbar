@@ -6,6 +6,7 @@ use super::*;
 use crate::command::{CommandError, CommandOutput, CommandSpec, MockCommandRunner};
 use rstest::{fixture, rstest};
 use std::collections::HashMap;
+use std::io;
 
 /// The directory every stubbed probe is rooted at.
 const REPO_DIR: &str = "/tmp/repo";
@@ -15,6 +16,8 @@ const REPOSITORY_ARGS: &[&str] = &["rev-parse", "--is-inside-work-tree"];
 const BRANCH_ARGS: &[&str] = &["branch", "--show-current"];
 const PORCELAIN_ARGS: &[&str] = &["status", "--porcelain"];
 const UPSTREAM_ARGS: &[&str] = &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"];
+/// Arguments for the project-name probe.
+const ORIGIN_ARGS: &[&str] = &["remote", "get-url", "origin"];
 
 /// The canned answers a test wants a [`MockCommandRunner`] to give, keyed by
 /// the exact spec each probe is expected to build.
@@ -99,7 +102,11 @@ fn expect_report(outcome: GitStatusOutcome) -> GitStatusReport {
 
 /// Assert an outcome carries exactly one failure and hand it back.
 fn expect_single_failure(outcome: GitStatusOutcome) -> GitProbeFailure {
-    let failures = outcome.into_failures();
+    expect_single_failure_in(outcome.into_failures())
+}
+
+/// Assert a failure list holds exactly one entry and hand it back.
+fn expect_single_failure_in(failures: Vec<GitProbeFailure>) -> GitProbeFailure {
     match <[GitProbeFailure; 1]>::try_from(failures) {
         Ok([failure]) => failure,
         Err(other) => panic!("expected exactly one failure, got {other:?}"),
@@ -111,14 +118,67 @@ fn expect_single_failure(outcome: GitStatusOutcome) -> GitProbeFailure {
 #[case("https://github.com/owner/alpha", "alpha")]
 fn project_name_prefers_origin(#[case] origin: &str, #[case] expected: &str) {
     let runner = Answers::default()
-        .answering_in(
-            Utf8Path::new("/tmp/demo"),
-            &["remote", "get-url", "origin"],
-            origin,
-        )
+        .answering_in(Utf8Path::new("/tmp/demo"), ORIGIN_ARGS, origin)
         .build();
-    let name = project_name(&runner, Utf8Path::new("/tmp/demo"));
-    assert_eq!(name.as_ref(), expected);
+    let outcome = project_name(&runner, Utf8Path::new("/tmp/demo"));
+    assert_eq!(outcome.name.as_ref(), expected);
+    assert!(outcome.failure.is_none());
+}
+
+#[rstest]
+fn project_name_treats_a_missing_origin_as_an_ordinary_case() {
+    // The empty answer set answers every spec with a non-zero exit, which is
+    // how git reports both "no such remote" and "not a repository".
+    let runner = Answers::default().build();
+    let outcome = project_name(&runner, Utf8Path::new("/tmp/demo"));
+    assert_eq!(outcome.name.as_ref(), "demo");
+    // git answered, so there is nothing to diagnose.
+    assert!(outcome.into_failures().is_empty());
+}
+
+#[rstest]
+fn project_name_reports_an_unrunnable_origin_probe() {
+    // An I/O error is what a missing `git` binary looks like, as opposed to a
+    // `git` that ran and reported no origin.
+    let mut runner = MockCommandRunner::new();
+    runner
+        .expect_run()
+        .times(1..)
+        .returning(|_| Err(CommandError::Io(io::Error::other("no git"))));
+
+    let outcome = project_name(&runner, Utf8Path::new("/tmp/demo"));
+    // The rendered contract is unchanged: the directory name still wins ...
+    assert_eq!(outcome.name.as_ref(), "demo");
+    // ... but the failure behind it is no longer invisible.
+    let failure = expect_single_failure_in(outcome.into_failures());
+    assert!(matches!(
+        failure,
+        GitProbeFailure::CommandFailed {
+            probe: GitProbe::OriginUrl,
+            ..
+        }
+    ));
+    assert!(failure.to_string().contains("remote get-url origin"));
+}
+
+#[rstest]
+#[case::trailing_separator("https://github.com/")]
+#[case::bare_separator("/")]
+fn project_name_reports_an_origin_url_naming_nothing(#[case] origin: &str) {
+    let runner = Answers::default()
+        .answering_in(Utf8Path::new("/tmp/demo"), ORIGIN_ARGS, origin)
+        .build();
+
+    let outcome = project_name(&runner, Utf8Path::new("/tmp/demo"));
+    assert_eq!(outcome.name.as_ref(), "demo");
+    let failure = expect_single_failure_in(outcome.into_failures());
+    assert!(matches!(
+        failure,
+        GitProbeFailure::MalformedOutput {
+            probe: GitProbe::OriginUrl,
+            ..
+        }
+    ));
 }
 
 #[rstest]
@@ -133,8 +193,9 @@ fn project_name_prefers_origin(#[case] origin: &str, #[case] expected: &str) {
 #[case::marker_first("/tmp/.worktrees/branch", "tmp")]
 fn project_name_falls_back_to_worktree_path(#[case] dir: &str, #[case] expected: &str) {
     let runner = Answers::default().build();
-    let name = project_name(&runner, Utf8Path::new(dir));
-    assert_eq!(name.as_ref(), expected);
+    let outcome = project_name(&runner, Utf8Path::new(dir));
+    assert_eq!(outcome.name.as_ref(), expected);
+    assert!(outcome.failure.is_none());
 }
 
 #[rstest]
@@ -146,7 +207,10 @@ fn git_status_parses_porcelain_and_counts(healthy_runner: Answers) {
 
     let report = expect_report(git_status(&runner, repo_dir()));
     // The trailing newline from `git` must be trimmed off the branch name.
-    assert_eq!(report.status.branch.as_ref(), "main");
+    assert_eq!(
+        report.status.branch.as_ref().map(BranchName::as_ref),
+        Some("main")
+    );
     assert!(report.status.dirty);
     assert!(report.status.staged);
     assert_eq!(report.status.ahead.value(), 2);
@@ -157,16 +221,17 @@ fn git_status_parses_porcelain_and_counts(healthy_runner: Answers) {
 #[rstest]
 #[case::empty("")]
 #[case::whitespace_only("  \n")]
-fn git_status_reports_detached_when_no_branch_is_current(
+fn git_status_reports_no_branch_when_head_is_detached(
     healthy_runner: Answers,
     #[case] branch_output: &str,
 ) {
     let runner = healthy_runner.answering(BRANCH_ARGS, branch_output).build();
 
     let report = expect_report(git_status(&runner, repo_dir()));
-    // A detached HEAD reports no current branch, so the label falls back ...
-    assert_eq!(report.status.branch.as_ref(), "detached");
-    // ... but that is a legitimate answer, not a degraded probe.
+    // No name is invented: the `detached` label is the renderer's business, so
+    // a real branch called `detached` stays distinguishable from this ...
+    assert!(report.status.branch.is_none());
+    // ... and this is a legitimate answer, not a degraded probe.
     assert!(report.degradations.is_empty());
 }
 
@@ -222,8 +287,9 @@ fn git_status_reports_a_failed_branch_probe(healthy_runner: Answers) {
     let runner = healthy_runner.failing(BRANCH_ARGS).build();
 
     let report = expect_report(git_status(&runner, repo_dir()));
-    // The rendered contract is unchanged: the branch still reads "detached".
-    assert_eq!(report.status.branch.as_ref(), "detached");
+    // The rendered contract is unchanged: with no branch the renderer still
+    // draws "detached".
+    assert!(report.status.branch.is_none());
     assert!(matches!(
         report.degradations.as_slice(),
         [GitProbeFailure::CommandFailed {

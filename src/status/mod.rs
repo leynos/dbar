@@ -121,17 +121,21 @@ pub fn build_status_report(
     let git_outcome = git::git_status(runner, &project_dir);
 
     // No branch means no lookup: the cache key and the branch heuristic both
-    // need one, so a non-repository simply has no PR segment.
+    // need one, so a non-repository — and equally a detached `HEAD`, which has
+    // no branch to key on — simply has no PR segment. Nothing synthetic is
+    // substituted here, so no cache entry can be written under an invented
+    // branch name.
     let pr_report = git_outcome
         .status()
+        .and_then(|status| status.branch.as_ref())
         .filter(|_| args.show_pr.unwrap_or(true))
-        .map(|status| {
+        .map(|branch| {
             resolve_pr_number(&PrLookup {
                 args,
                 clock,
                 github,
                 project_dir: &project_dir,
-                branch: status.branch.as_ref(),
+                branch: branch.as_ref(),
             })
         });
 
@@ -147,7 +151,7 @@ pub fn build_status_report(
     let clock_label = render_clock(args, clock)?;
 
     let line = render::render_status_line(&render::RenderContext {
-        project: &project,
+        project: &project.name,
         git_status: git_outcome.status(),
         pr_number: pr_report
             .as_ref()
@@ -157,10 +161,15 @@ pub fn build_status_report(
         client_width: args.client_width.map(usize::from),
     });
 
+    // The project-name probe is a git probe like any other, so its failures
+    // join the rest rather than being reported separately.
+    let mut git_failures = git_outcome.into_failures();
+    git_failures.extend(project.into_failures());
+
     Ok(StatusReport {
         line,
         diagnostics: StatusDiagnostics {
-            git: git_outcome.into_failures(),
+            git: git_failures,
             tmux: tmux_resolution.into_failures(),
             pr: pr_report,
         },
@@ -268,5 +277,7 @@ fn persist(
     }
 }
 
+#[cfg(test)]
+mod branch_tests;
 #[cfg(test)]
 mod tests;

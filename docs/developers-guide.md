@@ -68,12 +68,25 @@ from `run()` based on the parsed `DbarCommand`.
 - `types.rs` — domain newtypes (`ProjectName`, `BranchName`, `AheadCount`,
   `BehindCount`, `PrNumber`, `CacheTtlSeconds`, `StatusPosition`) that avoid
   passing bare `String`/integer values between modules.
-- `install/mod.rs` — `install()` inserts or updates a marker-delimited tmux
-  snippet in a configuration file, using `cap_std`/`camino` for path-capable,
-  UTF-8-only filesystem access, and backs up the previous contents before
-  replacing the target atomically: the new contents are written to a
-  uniquely named temporary file, which inherits the target's permissions,
-  then renamed over the target.
+- `install/mod.rs` — `install(config_path_opt: Option<Utf8PathBuf>, position:
+  StatusPosition, mode: RunMode, width: Width) -> Result<InstallOutcome,
+  InstallError>` inserts or updates a marker-delimited tmux snippet in a
+  configuration file, and backs up the previous contents before replacing
+  the target atomically: the new contents are written to a uniquely named
+  temporary file, which inherits the target's permissions, then renamed over
+  the target. `RunMode` (`DryRun`/`Write`) and `Width` (`Full`/`Plain`)
+  replaced what were originally two adjacent `bool` parameters: two booleans
+  of the same type can be transposed without the compiler noticing, and
+  transposing these two would silently turn a preview into a write of the
+  wrong variant, so each is its own enum instead. The module is split by
+  responsibility: `snippet.rs` decides what the config should contain
+  (marker handling and snippet assembly, pure and disk-free), and `fs.rs` is
+  the capability-based filesystem and locking layer underneath it, using
+  `cap_std`/`camino` for path-capable, UTF-8-only filesystem access and an
+  `flock`-backed sibling lock file to serialize concurrent installs against
+  the same config. Tests live in `tests.rs` (unit coverage of `install()` and
+  its helpers), `quoting_tests.rs` (snippet quoting/escaping), and
+  `property_tests.rs` (`proptest`-driven property coverage).
 - `error.rs` — `DbarError`, the top-level error enum returned by `run()`,
   wrapping `CacheError`, `config::ConfigError` (itself wrapping
   `ortho_config::OrthoError`), `InstallError`, and `std::io::Error`.
@@ -232,7 +245,9 @@ Tests are organized in three layers:
    `src/render/mod.rs`/`src/render/tests.rs`,
    `src/status/mod.rs`/`src/status/tests.rs`,
    `src/status/pr/mod.rs`/`src/status/pr/tests.rs`,
-   `src/install/mod.rs`/`src/install/tests.rs`, and
+   `src/install/mod.rs`/`src/install/tests.rs` (plus
+   `src/install/quoting_tests.rs` and `src/install/property_tests.rs`,
+   covering snippet quoting and property-based coverage respectively), and
    `src/config/mod.rs`/`src/config/tests/` (split into `mod.rs`,
    `arguments.rs`, and `files.rs`). Cases use `#[rstest]`, with `#[case]`
    parameterization for table-style coverage and `#[fixture]` for shared
@@ -300,7 +315,12 @@ Dependencies are pinned with caret requirements. Notable runtime crates:
 resolution), `ortho_config` (layered CLI/env/config parsing), and
 `mockable` (the `Clock` trait used to inject time). Dev-only crates
 (`rstest`, `rstest-bdd`, `rstest-bdd-macros`, `assert_cmd`, `insta`,
-`tempfile`) back the three test layers above.
+`tempfile`) back the three test layers above, alongside `mockall` and
+`proptest`: `mockall` generates the `MockCommandRunner` double described
+under "Dependency-injection seams", and is mandatory for every seam it
+covers — a bespoke, hand-rolled stub is not an acceptable substitute; and
+`proptest` drives the property-based tests in
+`src/install/property_tests.rs`.
 
 ### Real command execution
 

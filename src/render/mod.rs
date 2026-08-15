@@ -2,7 +2,7 @@
 
 use crate::git::GitStatus;
 use crate::tmux::TmuxContext;
-use crate::types::{PrNumber, ProjectName};
+use crate::types::{BranchName, PrNumber, ProjectName};
 use unicode_width::UnicodeWidthChar;
 
 const GLYPH_FADE_RIGHT: &str = "\u{e0c6}";
@@ -24,6 +24,14 @@ const COLOUR_BRANCH_DIRTY: u8 = 221;
 const COLOUR_PR: u8 = 176;
 const COLOUR_CHIP_WARN: u8 = 221;
 const COLOUR_CHIP_DANGER: u8 = 203;
+
+/// Label drawn when git reports no current branch.
+///
+/// The substitution belongs here rather than in the probes: it is a rendering
+/// decision, and minting it earlier would make a detached `HEAD` and a real
+/// branch called `detached` indistinguishable to the PR lookup and the cache
+/// key.
+const DETACHED_LABEL: &str = "detached";
 
 /// Borrowed inputs for one status-line render.
 ///
@@ -63,7 +71,7 @@ pub struct RenderContext<'a> {
 ///
 /// let project = ProjectName::new("demo");
 /// let git = GitStatus {
-///     branch: BranchName::new("main"),
+///     branch: Some(BranchName::new("main")),
 ///     dirty: false,
 ///     staged: false,
 ///     ahead: AheadCount::new(0),
@@ -146,6 +154,14 @@ fn render_project_segment(project: &ProjectName) -> String {
     )
 }
 
+/// The branch text to draw, standing in for an absent branch.
+fn branch_label(status: &GitStatus) -> &str {
+    status
+        .branch
+        .as_ref()
+        .map_or(DETACHED_LABEL, BranchName::as_ref)
+}
+
 fn render_branch_segment(status: &GitStatus) -> String {
     let branch_colour = if status.dirty {
         COLOUR_BRANCH_DIRTY
@@ -156,7 +172,7 @@ fn render_branch_segment(status: &GitStatus) -> String {
         "{}{} {}",
         style(Some(branch_colour), None),
         GLYPH_BRANCH,
-        escape_tmux(status.branch.as_ref())
+        escape_tmux(branch_label(status))
     )];
 
     let mut indicators = Vec::new();

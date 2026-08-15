@@ -7,8 +7,8 @@
 use camino::Utf8Path;
 
 use super::{GitProbe, GitProbeFailure};
-use crate::command::{CommandRunner, CommandSpec};
-use crate::types::{AheadCount, BehindCount, BranchName};
+use crate::command::{CommandError, CommandRunner, CommandSpec};
+use crate::types::{AheadCount, BehindCount, BranchName, ProjectName};
 
 /// A probed value paired with the failure, if any, that forced its fallback.
 pub(super) struct Probed<T> {
@@ -82,18 +82,72 @@ pub(super) fn probe_repository(
     }
 }
 
-/// Read the current branch, falling back to `detached`.
+/// Read the current branch, reporting `None` when there is not one.
+///
+/// No name is invented here. An empty answer means a detached `HEAD`, and a
+/// failed probe means git could not say; both leave the branch absent so that
+/// the renderer's `detached` label stays a rendering decision and cannot be
+/// mistaken for a real branch of that name further downstream.
 pub(super) fn probe_branch(
     runner: &dyn CommandRunner,
     project_dir: &Utf8Path,
-) -> Probed<BranchName> {
+) -> Probed<Option<BranchName>> {
     let probe = GitProbe::Branch;
     match run_probe(runner, project_dir, probe, ["branch", "--show-current"]) {
         // An empty answer is git's documented way of saying "detached HEAD",
         // so it is a legitimate result rather than a degradation.
-        Ok(stdout) if stdout.trim().is_empty() => Probed::ok(BranchName::new("detached")),
-        Ok(stdout) => Probed::ok(BranchName::new(stdout.trim().to_owned())),
-        Err(failure) => Probed::degraded(BranchName::new("detached"), failure),
+        Ok(stdout) if stdout.trim().is_empty() => Probed::ok(None),
+        Ok(stdout) => Probed::ok(Some(BranchName::new(stdout.trim().to_owned()))),
+        Err(failure) => Probed::degraded(None, failure),
+    }
+}
+
+/// Read the project name from the `origin` remote URL.
+///
+/// A non-zero exit is git *answering*: it is how `git remote get-url` reports
+/// that there is no `origin` remote, and how git reports that the directory is
+/// not a repository at all. Both are ordinary cases for which the path-derived
+/// name is the intended answer, so neither is recorded as a degradation. Every
+/// other failure — a missing `git` binary, a timeout, an oversized stream, or
+/// a URL whose last segment is empty — is a genuine probe failure and is
+/// reported.
+pub(super) fn probe_origin_name(
+    runner: &dyn CommandRunner,
+    project_dir: &Utf8Path,
+) -> Probed<Option<ProjectName>> {
+    let probe = GitProbe::OriginUrl;
+    let stdout = match run_probe(runner, project_dir, probe, ["remote", "get-url", "origin"]) {
+        Ok(value) => value,
+        Err(GitProbeFailure::CommandFailed {
+            source: CommandError::NonZero { .. },
+            ..
+        }) => return Probed::ok(None),
+        Err(failure) => return Probed::degraded(None, failure),
+    };
+
+    parse_origin_name(&stdout).map_or_else(
+        || {
+            Probed::degraded(
+                None,
+                GitProbeFailure::MalformedOutput {
+                    probe,
+                    output: stdout.trim().to_owned(),
+                },
+            )
+        },
+        |name| Probed::ok(Some(name)),
+    )
+}
+
+/// Take the repository name off the end of a remote URL.
+fn parse_origin_name(origin: &str) -> Option<ProjectName> {
+    let trimmed = origin.trim();
+    let name = trimmed.rsplit(&['/', ':'][..]).next()?;
+    let cleaned = name.trim_end_matches(".git");
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(ProjectName::new(cleaned.to_owned()))
     }
 }
 

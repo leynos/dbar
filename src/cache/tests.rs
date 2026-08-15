@@ -1,4 +1,5 @@
 //! Round-trip, TTL-expiry, and retention-sweep tests for the PR cache layer.
+use super::retention::{SWEEP_INSPECT_LIMIT, SWEEP_REMOVAL_LIMIT};
 use super::*;
 use camino::Utf8PathBuf;
 use mockable::DefaultClock;
@@ -74,6 +75,50 @@ fn concurrent_writes_never_expose_partial_json(cache_path: CachePath) {
         .expect("read must never see partial JSON");
     let observed = value.expect("a value should be present");
     assert!((0..writers).any(|id| observed == id.to_string()));
+}
+
+/// A cache payload of exactly `len` bytes that still parses as an entry.
+fn padded_entry(len: usize, updated_at: u64) -> String {
+    let bare = serde_json::json!({ "value": "", "updated_at": updated_at }).to_string();
+    let padding = len.saturating_sub(bare.len());
+    let value = "x".repeat(padding);
+    serde_json::json!({ "value": value, "updated_at": updated_at }).to_string()
+}
+
+#[rstest]
+fn load_refuses_an_entry_past_the_ceiling(#[with("oversized.json")] cache_path: CachePath) {
+    let (_temp_dir, path) = cache_path.expect("cache path");
+    let payload = padded_entry(MAX_ENTRY_BYTES + 1, 0);
+    assert!(payload.len() > MAX_ENTRY_BYTES);
+    write(&path, &payload).expect("write oversized entry");
+
+    let clock = DefaultClock;
+    let error = load_cached_value(&path, &clock, CacheTtlSeconds::new(600))
+        .expect_err("an oversized entry must be refused");
+    assert!(
+        matches!(
+            error,
+            CacheError::EntryTooLarge { limit, .. } if limit == MAX_ENTRY_BYTES
+        ),
+        "expected a size error, got {error:?}"
+    );
+}
+
+#[rstest]
+fn load_accepts_an_entry_at_the_ceiling(#[with("at_limit.json")] cache_path: CachePath) {
+    let (_temp_dir, path) = cache_path.expect("cache path");
+    let clock = DefaultClock;
+    let now = now_seconds(&clock).expect("clock reading");
+    let payload = padded_entry(MAX_ENTRY_BYTES, now);
+    assert_eq!(payload.len(), MAX_ENTRY_BYTES);
+    write(&path, &payload).expect("write entry at the ceiling");
+
+    let value = load_cached_value(&path, &clock, CacheTtlSeconds::new(600))
+        .expect("an entry at the ceiling must be readable");
+    assert_eq!(
+        value.map(|entry| entry.len()),
+        Some(MAX_ENTRY_BYTES - padded_entry(0, now).len())
+    );
 }
 
 /// A dbar-owned cache file name whose sweep behaviour a test drives.
@@ -206,6 +251,19 @@ fn sweep_leaves_malformed_owned_entries_for_the_typed_error_path(workspace: Work
     assert!(
         matches!(error, CacheError::Serde(_)),
         "expected a serde error, got {error:?}"
+    );
+}
+
+#[rstest]
+fn sweep_leaves_oversized_owned_entries_alone(workspace: Workspace) {
+    let (_temp_dir, dir) = workspace.expect("workspace");
+    let payload = padded_entry(MAX_ENTRY_BYTES + 1, 0);
+    seed_raw(&dir, "pr_00000000000000ef.json", &payload).expect("seed oversized entry");
+    sweep_via_expired_read(&dir).expect("expired read");
+    assert_eq!(
+        entry_names(&dir).expect("list directory"),
+        vec!["pr_00000000000000ef.json"],
+        "a file too large to be one dbar wrote is not provably ours to delete"
     );
 }
 
