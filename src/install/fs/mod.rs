@@ -85,7 +85,12 @@ fn open_lock_file(config_path: &Utf8Path) -> Result<File, InstallError> {
 }
 
 /// Attempt a non-blocking exclusive `flock`, reporting whether it was taken.
-#[cfg(unix)]
+///
+/// There is deliberately no non-Unix fallback. A stub returning `Ok(true)`
+/// would report the lock as held on a platform that has no mutual exclusion at
+/// all, so every install on that platform would silently believe it owned a
+/// transaction it did not own. `crate::command` refuses to build off Unix for
+/// the same class of reason; see the gate there.
 fn try_lock_exclusive(file: &File) -> Result<bool, InstallError> {
     use rustix::fs::{FlockOperation, flock};
     use rustix::io::Errno;
@@ -97,17 +102,6 @@ fn try_lock_exclusive(file: &File) -> Result<bool, InstallError> {
         Err(err) if err == Errno::WOULDBLOCK || err == Errno::AGAIN => Ok(false),
         Err(err) => Err(InstallError::Io(io::Error::from(err))),
     }
-}
-
-/// Platforms without `flock` fall back to no synchronization, matching the
-/// process-group precedent in `crate::command`.
-#[cfg(not(unix))]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "the signature must match the unix implementation"
-)]
-fn try_lock_exclusive(_file: &File) -> Result<bool, InstallError> {
-    Ok(true)
 }
 
 /// The largest tmux configuration the installer will read.

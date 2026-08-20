@@ -36,13 +36,57 @@ impl<T> Probed<T> {
     }
 }
 
-/// Build a `git` command spec rooted at the given project directory.
-pub(super) fn git_command(
+/// Global `git` options that stop the probed repository executing code.
+///
+/// `project_dir` is wherever the user happens to have changed directory to —
+/// tmux reports it from `pane_current_path` — so the repository being probed is
+/// not necessarily one the user trusts. Several git configuration keys name a
+/// command that git then runs, and a repository carries its own `.git/config`,
+/// so without these options merely `cd`-ing into a hostile checkout would run
+/// its code on every status-line refresh.
+///
+/// Each option is chosen to leave the probes' *answers* untouched:
+///
+/// - `core.fsmonitor` names a filesystem-monitor command that `git status`
+///   runs. It is purely an optimization: with it disabled git scans the
+///   worktree itself and reports the same dirty and staged flags, only more
+///   slowly.
+/// - `core.hooksPath` selects the hook directory, and `git status` runs the
+///   `post-index-change` hook whenever refreshing stat information makes it
+///   rewrite the index. Pointing the path at a non-directory makes every hook
+///   lookup miss, including hooks in the default `.git/hooks`. No hook these
+///   read-only probes can reach contributes to their output, so suppressing
+///   them changes nothing that is rendered.
+/// - `--no-optional-locks` stops the probes taking `index.lock` to persist that
+///   refresh at all. It is git's documented option for exactly this kind of
+///   periodic reader: it removes the index write that the hook hangs off, and
+///   it keeps a status-line refresh from contending with the interactive `git`
+///   the user is running in the same worktree.
+///
+/// Applied here rather than at each call site so that a probe added later
+/// cannot forget them.
+const HARDENING_ARGS: &[&str] = &[
+    "--no-optional-locks",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+];
+
+/// Build a hardened `git` command spec rooted at the given project directory.
+///
+/// See [`HARDENING_ARGS`] for what is disabled and why none of it changes what
+/// the probes report.
+pub(crate) fn git_command(
     project_dir: &Utf8Path,
     args: impl IntoIterator<Item = impl Into<String>>,
 ) -> CommandSpec {
+    let hardened = HARDENING_ARGS
+        .iter()
+        .map(|option| (*option).to_owned())
+        .chain(args.into_iter().map(Into::into));
     CommandSpec::new("git")
-        .args(args)
+        .args(hardened)
         .cwd(project_dir.to_path_buf())
 }
 
@@ -140,10 +184,17 @@ pub(super) fn probe_origin_name(
 }
 
 /// Take the repository name off the end of a remote URL.
+///
+/// At most one `.git` suffix is removed. `trim_end_matches` strips every
+/// repetition, so a repository genuinely named `foo.git` — whose remote URL
+/// ends `foo.git.git` — was losing both and rendering as `foo`.
+/// `strip_suffix` reports "no suffix to remove" as `None`, which is the
+/// ordinary case of a URL that does not end in `.git`, so the name is kept
+/// as-is rather than defaulted away.
 fn parse_origin_name(origin: &str) -> Option<ProjectName> {
     let trimmed = origin.trim();
     let name = trimmed.rsplit(&['/', ':'][..]).next()?;
-    let cleaned = name.trim_end_matches(".git");
+    let cleaned = name.strip_suffix(".git").unwrap_or(name);
     if cleaned.is_empty() {
         None
     } else {

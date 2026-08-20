@@ -70,14 +70,18 @@ impl SweepContext<'_> {
 ///
 /// # Examples
 ///
+/// The `cache` module is crate-internal — `dbar` exposes only `run` and
+/// `DbarError` — so this example is written against the in-crate path and is
+/// `ignore`d rather than compiled.
+///
 /// ```rust,ignore
 /// use camino::Utf8Path;
-/// use dbar::cache::sweep_cache_dir;
-/// use dbar::types::CacheTtlSeconds;
+/// use crate::cache::retention::sweep_cache_dir;
+/// use crate::types::CacheTtlSeconds;
 /// use mockable::DefaultClock;
 ///
 /// sweep_cache_dir(Utf8Path::new("."), &DefaultClock, CacheTtlSeconds::new(60))?;
-/// # Ok::<(), dbar::cache::CacheError>(())
+/// # Ok::<(), crate::cache::CacheError>(())
 /// ```
 pub fn sweep_cache_dir(
     dir_path: &Utf8Path,
@@ -203,4 +207,36 @@ fn read_swept_entry(
 
 fn is_vanished(err: &std::io::Error) -> bool {
     err.kind() == std::io::ErrorKind::NotFound
+}
+
+#[cfg(test)]
+mod tests {
+    //! Coverage pinning the sweep's ownership predicate to the writer that
+    //! actually mints cache-file names.
+    use super::is_owned_name;
+    use crate::status::cache_key::pr_cache_path;
+    use camino::Utf8Path;
+    use rstest::rstest;
+
+    /// The sweep only removes names [`is_owned_name`] accepts, and those names
+    /// are produced in another module. If either side's format drifts the sweep
+    /// silently stops reclaiming anything, so the two are pinned together here
+    /// rather than left to agree by inspection.
+    #[rstest]
+    #[case::plain("/projects/demo", "main")]
+    #[case::slashed_branch("/projects/demo", "feature/a")]
+    #[case::punctuated("/projects/a_b.c-d", "release/1.2")]
+    #[case::non_ascii("/projects/démo", "ветка")]
+    #[case::empty_branch("/projects/demo", "")]
+    fn sweep_owns_every_name_the_cache_key_writer_mints(
+        #[case] project_dir: &str,
+        #[case] branch: &str,
+    ) {
+        let path = pr_cache_path(Utf8Path::new("/cache"), Utf8Path::new(project_dir), branch);
+        let name = path.file_name().expect("cache path ends in a file name");
+        assert!(
+            is_owned_name(name),
+            "the retention sweep would skip {name}, which pr_cache_path minted"
+        );
+    }
 }

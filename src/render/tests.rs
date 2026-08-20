@@ -4,7 +4,6 @@ use crate::tmux::TmuxContext;
 use crate::types::{AheadCount, BehindCount, BranchName, PrNumber, ProjectName};
 use proptest::prelude::*;
 use rstest::{fixture, rstest};
-use unicode_width::UnicodeWidthStr;
 
 /// tmux metadata for a pane on the default server.
 #[fixture]
@@ -130,13 +129,13 @@ fn visible_width_counts_escaped_hash_as_one_column() {
 }
 
 /// What a tmux-style scan of a rendered line found.
-struct ConstructScan {
+pub(super) struct ConstructScan {
     /// Number of the renderer's own `#[...]` style tags.
-    styles: usize,
+    pub(super) styles: usize,
     /// Introducer of the first surviving `#{` or `#(` construct, if any.
-    active: Option<char>,
+    pub(super) active: Option<char>,
     /// Body of the first `#[...]` tag outside the renderer's vocabulary.
-    foreign: Option<String>,
+    pub(super) foreign: Option<String>,
 }
 
 /// Whether one `fg=`/`bg=` clause is one the renderer itself emits.
@@ -175,7 +174,7 @@ fn is_renderer_style(body: &str) -> bool {
 /// neutralised, and is reported through `foreign` instead. Without that check
 /// an injected `#[fg=red]` would satisfy the "style tags survive" assertion and
 /// mask a missing `escape_tmux` call.
-fn scan_constructs(line: &str) -> ConstructScan {
+pub(super) fn scan_constructs(line: &str) -> ConstructScan {
     let mut styles = 0_usize;
     let mut active = None;
     let mut foreign: Option<String> = None;
@@ -209,7 +208,7 @@ fn scan_constructs(line: &str) -> ConstructScan {
 }
 
 #[test]
-fn scan_constructs_rejects_value_derived_style_tags() {
+pub(super) fn scan_constructs_rejects_value_derived_style_tags() {
     let renderer_only = scan_constructs("#[fg=colour117,bg=colour24]x#[fg=colour24,bg=default]y");
     assert_eq!(renderer_only.styles, 2);
     assert_eq!(renderer_only.foreign, None);
@@ -250,37 +249,47 @@ fn hostile_values_are_neutralised_in_every_segment(#[case] hostile: &str) {
 }
 
 /// Attacker-controlled values for every dynamic field of the status line.
-struct DynamicValues {
+pub(super) struct DynamicValues {
     /// Project name for the left-most segment.
-    project: String,
+    pub(super) project: String,
     /// Git branch name.
-    branch: String,
+    pub(super) branch: String,
     /// Pull-request number.
-    pr: String,
+    pub(super) pr: String,
     /// Clock label.
-    clock: String,
+    pub(super) clock: String,
     /// tmux session name.
-    session: String,
+    pub(super) session: String,
+    /// tmux window index.
+    ///
+    /// tmux supplies this, but dbar receives it as a command-line argument and
+    /// interpolates it into the same location label as the session, so it is
+    /// no less attacker-influenced than the rest and is generated, not pinned.
+    pub(super) window: String,
+    /// tmux pane identifier, carried for the same reason as `window`.
+    pub(super) pane: String,
     /// tmux socket path.
-    socket: String,
+    pub(super) socket: String,
 }
 
 impl DynamicValues {
     /// Use one value for every field.
-    fn uniform(value: &str) -> Self {
+    pub(super) fn uniform(value: &str) -> Self {
         Self {
             project: value.to_owned(),
             branch: value.to_owned(),
             pr: value.to_owned(),
             clock: value.to_owned(),
             session: value.to_owned(),
+            window: value.to_owned(),
+            pane: value.to_owned(),
             socket: value.to_owned(),
         }
     }
 }
 
 /// Render a full status line from attacker-controlled values.
-fn render_dynamic(values: &DynamicValues) -> String {
+pub(super) fn render_dynamic(values: &DynamicValues) -> String {
     let project = ProjectName::new(values.project.clone());
     let status = GitStatus {
         branch: Some(BranchName::new(values.branch.clone())),
@@ -293,8 +302,8 @@ fn render_dynamic(values: &DynamicValues) -> String {
     let pr = PrNumber::new(values.pr.clone());
     let tmux = TmuxContext {
         session: Some(values.session.clone()),
-        window: Some("1".into()),
-        pane: Some("%0".into()),
+        window: Some(values.window.clone()),
+        pane: Some(values.pane.clone()),
         socket: Some(values.socket.clone()),
     };
     let context = RenderContext {
@@ -318,7 +327,7 @@ const WIDE_CHARS: &[char] = &['漢', '字', '한', '　', 'ｗ', 'あ'];
 const MARK_CHARS: &[char] = &['\u{300}', '\u{301}', '\u{35b}', '\u{200b}', '\u{200c}'];
 
 /// A bounded generator of hostile, Unicode-mixed renderer input.
-fn dynamic_value() -> impl Strategy<Value = String> {
+pub(super) fn dynamic_value() -> impl Strategy<Value = String> {
     let character = prop_oneof![
         4 => proptest::char::range('!', '~'),
         4 => proptest::sample::select(META_CHARS),
@@ -328,58 +337,4 @@ fn dynamic_value() -> impl Strategy<Value = String> {
     ];
     proptest::collection::vec(character, 0..12)
         .prop_map(|characters| characters.into_iter().collect())
-}
-
-proptest! {
-    // Bounded and deterministic for continuous integration; regression files
-    // are disabled because the repository tracks none.
-    #![proptest_config(ProptestConfig {
-        cases: 256,
-        failure_persistence: None,
-        ..ProptestConfig::default()
-    })]
-
-    /// No dynamic value may introduce an active `#{` or `#(` construct, while
-    /// the renderer's own `#[...]` style tags survive unescaped.
-    #[test]
-    fn dynamic_values_never_introduce_active_constructs(
-        project in dynamic_value(),
-        branch in dynamic_value(),
-        pr in dynamic_value(),
-        clock in dynamic_value(),
-        session in dynamic_value(),
-        socket in dynamic_value(),
-    ) {
-        let line = render_dynamic(&DynamicValues { project, branch, pr, clock, session, socket });
-        let scan = scan_constructs(&line);
-        prop_assert!(scan.active.is_none(), "active construct survived in: {line}");
-        prop_assert!(
-            scan.foreign.is_none(),
-            "a value-derived style tag survived in: {line}"
-        );
-        prop_assert!(scan.styles > 0, "renderer style tags were escaped away: {line}");
-    }
-
-    /// Escaping preserves the value's visible width: `##` renders as one `#`.
-    #[test]
-    fn escaping_preserves_visible_width(value in dynamic_value()) {
-        prop_assert_eq!(
-            visible_width(&escape_tmux(&value)),
-            UnicodeWidthStr::width(value.as_str())
-        );
-    }
-
-    /// Width accounting is exact enough to pad a line to the client width.
-    #[test]
-    fn layout_pads_escaped_values_to_the_client_width(
-        left in dynamic_value(),
-        right in dynamic_value(),
-        slack in 1_usize..40,
-    ) {
-        let escaped_left = escape_tmux(&left);
-        let escaped_right = escape_tmux(&right);
-        let width = visible_width(&escaped_left) + visible_width(&escaped_right) + slack + 1;
-        let output = layout_with_width(&escaped_left, &escaped_right, width);
-        prop_assert_eq!(visible_width(&output), width);
-    }
 }

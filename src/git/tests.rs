@@ -116,6 +116,14 @@ fn expect_single_failure_in(failures: Vec<GitProbeFailure>) -> GitProbeFailure {
 #[rstest]
 #[case("git@github.com:owner/dbar.git", "dbar")]
 #[case("https://github.com/owner/alpha", "alpha")]
+// Only the suffix git itself appends is removed. A repository genuinely named
+// `beta.git` is cloned from `beta.git.git`, and stripping repeatedly would
+// render it as `beta`.
+#[case("https://github.com/owner/beta.git.git", "beta.git")]
+// The same name without the appended suffix keeps every character.
+#[case("git@github.com:owner/gamma.git.git", "gamma.git")]
+// A dotted name that merely ends in the four characters must survive intact.
+#[case("https://github.com/owner/delta.github", "delta.github")]
 fn project_name_prefers_origin(#[case] origin: &str, #[case] expected: &str) {
     let runner = Answers::default()
         .answering_in(Utf8Path::new("/tmp/demo"), ORIGIN_ARGS, origin)

@@ -364,4 +364,6 @@ const fn reset() -> &'static str {
 }
 
 #[cfg(test)]
+mod property_tests;
+#[cfg(test)]
 mod tests;

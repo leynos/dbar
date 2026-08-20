@@ -20,6 +20,13 @@ by tmux formats and configured with `ortho_config`.
 
 ## Quick start
 
+dbar builds and runs on Unix only, and says so at compile time rather than
+building into something that misbehaves. It relies on POSIX process groups to
+stop a probe's descendants outliving it, and on `flock` to make an install
+transactional; neither has a portable equivalent here, and stubbing them would
+mean claiming a mutual exclusion and a cleanup that were never happening. tmux
+itself is a Unix tool, so nothing is lost in practice.
+
 Render a status line directly:
 
 ```sh

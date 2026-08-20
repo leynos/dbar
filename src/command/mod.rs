@@ -1,13 +1,43 @@
 //! Command execution helpers for git and tmux probes.
+//!
+//! # Platform support
+//!
+//! dbar is a Unix-only crate, and this module is where that is enforced for the
+//! whole build. The claim is not merely that tmux — the only thing dbar exists
+//! to drive — is a Unix program. It is that dbar's two safety properties are
+//! both implemented with POSIX primitives that have no portable equivalent
+//! here:
+//!
+//! - the probe timeout below depends on placing the child in its own process
+//!   group and signalling that group, because killing only the direct child
+//!   leaves a backgrounded grandchild holding the inherited pipe write end and
+//!   the reader threads never see EOF;
+//! - the install transaction in `crate::install::fs` depends on `flock`.
+//!
+//! Both were previously stubbed out on non-Unix targets so that the crate would
+//! notionally compile there, which meant a non-Unix build silently ran with no
+//! descendant kill and no install lock while the surrounding code went on
+//! claiming to be transactional. A build that cannot uphold what it promises is
+//! worse than one that refuses to exist, so it now refuses. `rustix`, the crate
+//! already used for both primitives, supports only Winsock on Windows, so
+//! adding real support would mean a new dependency and a Windows story nobody
+//! runs; that decision has not been taken.
+#[cfg(not(unix))]
+compile_error!(
+    "dbar supports Unix targets only: its probe timeout needs POSIX process \
+     groups and its install transaction needs flock, and stubbing either out \
+     would silently drop a guarantee the code claims to provide"
+);
 
-use std::io::{self, Read};
-use std::process::{Child, Command, Stdio};
-use std::thread::JoinHandle;
+use std::process::Command;
 use std::time::Duration;
 
 use camino::Utf8PathBuf;
 use thiserror::Error;
-use wait_timeout::ChildExt;
+
+mod child;
+
+use child::{ChildSession, capture_output, require_within_limit, use_own_process_group};
 
 /// Default wall-clock ceiling applied when a spec sets no explicit timeout.
 ///
@@ -177,149 +207,30 @@ pub trait CommandRunner {
 /// A command runner that executes real processes.
 pub struct RealCommandRunner;
 
-/// Take a piped handle off the child, mapping the impossible `None` to an error.
-fn take_pipe<T>(pipe: Option<T>) -> Result<T, CommandError> {
-    pipe.ok_or_else(|| CommandError::Io(io::Error::other("child pipe unavailable")))
-}
-
-/// What a bounded reader thread observed on its stream.
-enum ReadOutcome {
-    /// The stream ended within its ceiling, yielding these bytes.
-    Bytes(Vec<u8>),
-    /// The stream exceeded its ceiling; the payload was discarded.
-    TooLarge,
-}
-
-/// Drain a child pipe on its own thread so the child never blocks on a full
-/// pipe buffer while the parent is waiting for it to exit.
-///
-/// The read is bounded at `limit` bytes. One byte beyond the ceiling is read so
-/// that overrunning the limit is distinguishable from exactly reaching it; if
-/// that extra byte materializes the buffer is dropped and the child's process
-/// group is killed, because there is no point letting a runaway producer keep
-/// writing into a capture that has already been abandoned.
-fn spawn_reader(
-    mut pipe: impl Read + Send + 'static,
-    limit: usize,
-    pid: u32,
-) -> JoinHandle<io::Result<ReadOutcome>> {
-    std::thread::spawn(move || {
-        let ceiling = u64::try_from(limit)
-            .map_err(|_| io::Error::other("output limit does not fit in a byte count"))?;
-        let mut buffer = Vec::new();
-        pipe.by_ref().take(ceiling + 1).read_to_end(&mut buffer)?;
-        if buffer.len() > limit {
-            // Release the oversized payload before doing anything else; it must
-            // not be retained or handed back to the caller.
-            drop(buffer);
-            // Best effort: the caller's cleanup paths are the backstop, so a
-            // failure here is not worth reporting over the size violation.
-            drop(signal_process_group(pid));
-            return Ok(ReadOutcome::TooLarge);
-        }
-        Ok(ReadOutcome::Bytes(buffer))
-    })
-}
-
-/// Collect a reader thread's outcome.
-fn join_reader(handle: JoinHandle<io::Result<ReadOutcome>>) -> Result<ReadOutcome, CommandError> {
-    let outcome = handle
-        .join()
-        .map_err(|_| io::Error::other("output reader thread panicked"))??;
-    Ok(outcome)
-}
-
-/// Unwrap a reader outcome, reporting an overrun against the named stream.
-fn require_within_limit(
-    outcome: ReadOutcome,
-    limit: usize,
-    stream: &'static str,
-) -> Result<Vec<u8>, CommandError> {
-    match outcome {
-        ReadOutcome::Bytes(bytes) => Ok(bytes),
-        ReadOutcome::TooLarge => Err(CommandError::OutputTooLarge { limit, stream }),
-    }
-}
-
-/// Put the child in its own process group so its descendants can be signalled
-/// as a unit.
-#[cfg(unix)]
-fn use_own_process_group(command: &mut Command) {
-    use std::os::unix::process::CommandExt as _;
-    command.process_group(0);
-}
-
-#[cfg(not(unix))]
-fn use_own_process_group(_command: &mut Command) {}
-
-/// Terminate the child and every descendant sharing its process group.
-///
-/// Signalling only the direct child would leave a backgrounded grandchild
-/// holding the inherited pipe write end open, so the reader threads would never
-/// observe EOF and the timeout would block instead of returning.
-///
-/// The pid is taken raw rather than as a `&Child` so that a reader thread,
-/// which does not own the child handle, can terminate the group too.
-#[cfg(unix)]
-fn signal_process_group(child_pid: u32) -> Result<(), CommandError> {
-    let raw = i32::try_from(child_pid)
-        .map_err(|_| io::Error::other("child pid does not fit in a process id"))?;
-    let pid = rustix::process::Pid::from_raw(raw)
-        .ok_or_else(|| io::Error::other("child pid is not a valid process id"))?;
-    match rustix::process::kill_process_group(pid, rustix::process::Signal::KILL) {
-        // An empty group means every descendant has already exited, which is
-        // exactly the state the caller wants; treat it as success.
-        Ok(()) | Err(rustix::io::Errno::SRCH) => Ok(()),
-        Err(err) => Err(CommandError::Io(io::Error::from(err))),
-    }
-}
-
-#[cfg(not(unix))]
-fn signal_process_group(_child_pid: u32) -> Result<(), CommandError> {
-    Ok(())
-}
-
-/// Terminate the child and every descendant, then reap the direct child.
-fn terminate_child_tree(child: &mut Child) -> Result<(), CommandError> {
-    #[cfg(not(unix))]
-    child.kill()?;
-    signal_process_group(child.id())?;
-    child.wait()?;
-    Ok(())
-}
-
 impl CommandRunner for RealCommandRunner {
     fn run(&self, spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
         let mut command = Command::new(&spec.program);
-        command
-            .args(&spec.args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        command.args(&spec.args);
+        capture_output(&mut command);
         if let Some(cwd) = &spec.cwd {
             command.current_dir(cwd.as_std_path());
         }
         use_own_process_group(&mut command);
         let timeout = spec.timeout.unwrap_or(DEFAULT_TIMEOUT);
         let max_output = spec.max_output_bytes.unwrap_or(DEFAULT_MAX_OUTPUT_BYTES);
-        let mut child = command.spawn()?;
-        let pid = child.id();
+        // Past this point every exit path — including each `?` below — runs
+        // `ChildSession::drop`, which releases the process group, reaps the
+        // child, and joins whichever readers are still outstanding.
+        let mut session = ChildSession::new(command.spawn()?);
+        session.start_readers(max_output)?;
 
-        // Drain both pipes concurrently with the wait. A child that writes more
-        // than the OS pipe buffer (64 KiB on Linux) blocks in `write` until the
-        // parent reads, which would otherwise be misreported as a timeout.
-        let stdout_reader = spawn_reader(take_pipe(child.stdout.take())?, max_output, pid);
-        let stderr_reader = spawn_reader(take_pipe(child.stderr.take())?, max_output, pid);
-
-        let Some(status) = child.wait_timeout(timeout)? else {
+        let Some(status) = session.wait_for(timeout)? else {
             // Kill the whole group: any descendant still holding the inherited
             // pipe write end would otherwise keep the readers from seeing EOF.
-            terminate_child_tree(&mut child)?;
-            // Every writer is now gone, so the readers finish promptly; join
-            // them to avoid leaking threads, but keep the timeout as the
-            // reported failure.
-            drop(join_reader(stdout_reader));
-            drop(join_reader(stderr_reader));
+            // Every writer is then gone, so the guard's joins finish promptly,
+            // and the timeout stays the reported failure.
+            session.release_process_group()?;
+            session.reap()?;
             return Err(CommandError::Timeout { timeout });
         };
 
@@ -327,10 +238,9 @@ impl CommandRunner for RealCommandRunner {
         // still hold the inherited pipe write ends. Without releasing the group
         // the reader joins below would block indefinitely, and this path has no
         // timeout to fall back on.
-        signal_process_group(pid)?;
+        session.release_process_group()?;
 
-        let stdout_outcome = join_reader(stdout_reader)?;
-        let stderr_outcome = join_reader(stderr_reader)?;
+        let (stdout_outcome, stderr_outcome) = session.join_readers()?;
         // An overrun kills the child, so its exit status reflects the signal
         // rather than anything the command decided; report the size violation
         // before consulting the status at all.

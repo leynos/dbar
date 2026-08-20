@@ -14,6 +14,7 @@ use rstest::rstest;
 use super::build_status_report;
 use crate::command::{CommandError, CommandOutput, CommandSpec, MockCommandRunner};
 use crate::config::StatusArgs;
+use crate::git::git_command;
 use crate::github::{GitHubClient, GitHubError};
 use crate::types::PrNumber;
 
@@ -49,9 +50,12 @@ impl GitHubClient for CountingGitHubClient {
 
 /// Build the spec one `git` probe rooted at the project directory produces.
 fn git_spec(args: &[&str]) -> CommandSpec {
-    CommandSpec::new("git")
-        .args(args.iter().copied())
-        .cwd(Utf8PathBuf::from(PROJECT_DIR))
+    // Built through `git_command` rather than spelled out, so the stub keys
+    // carry whatever hardening the probes carry. Re-spelling them here would
+    // make every answer silently stop matching the moment a probe-wide option
+    // is added, and the tests would then assert against a repository that
+    // answered nothing.
+    git_command(Utf8Path::new(PROJECT_DIR), args.iter().copied())
 }
 
 /// A runner answering a healthy repository whose `HEAD` is detached.

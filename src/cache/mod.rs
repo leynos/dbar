@@ -93,10 +93,10 @@ struct CacheEntry {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use dbar::cache::resolve_cache_dir;
+/// use crate::cache::resolve_cache_dir;
 ///
 /// let dir = resolve_cache_dir(None)?;
-/// # Ok::<(), dbar::cache::CacheError>(())
+/// # Ok::<(), crate::cache::CacheError>(())
 /// ```
 pub fn resolve_cache_dir(override_dir: Option<Utf8PathBuf>) -> Result<Utf8PathBuf, CacheError> {
     if let Some(path) = override_dir {
@@ -121,14 +121,14 @@ pub fn resolve_cache_dir(override_dir: Option<Utf8PathBuf>) -> Result<Utf8PathBu
 ///
 /// ```rust,ignore
 /// use camino::Utf8Path;
-/// use dbar::cache::load_cached_value;
+/// use crate::cache::load_cached_value;
 /// use mockable::DefaultClock;
-/// use dbar::types::CacheTtlSeconds;
+/// use crate::types::CacheTtlSeconds;
 ///
 /// let clock = DefaultClock;
 /// let value = load_cached_value(Utf8Path::new("cache.json"), &clock, CacheTtlSeconds::new(60))?;
 /// assert!(value.is_none());
-/// # Ok::<(), dbar::cache::CacheError>(())
+/// # Ok::<(), crate::cache::CacheError>(())
 /// ```
 pub fn load_cached_value(
     path: &Utf8Path,
@@ -161,12 +161,12 @@ pub fn load_cached_value(
 ///
 /// ```rust,ignore
 /// use camino::Utf8Path;
-/// use dbar::cache::store_cached_value;
+/// use crate::cache::store_cached_value;
 /// use mockable::DefaultClock;
 ///
 /// let clock = DefaultClock;
 /// store_cached_value(Utf8Path::new("cache.json"), &clock, "123")?;
-/// # Ok::<(), dbar::cache::CacheError>(())
+/// # Ok::<(), crate::cache::CacheError>(())
 /// ```
 pub fn store_cached_value(
     path: &Utf8Path,

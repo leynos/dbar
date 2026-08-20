@@ -11,6 +11,18 @@ use super::tmux_width::visible_width;
 /// The value passed to `--client-width` by the full-width snapshot test.
 const CLIENT_WIDTH: usize = 80;
 
+/// Clear the git repository redirection variables from a child process.
+///
+/// `dbar` runs git itself, so the same `GIT_DIR`, `GIT_WORK_TREE` and
+/// `GIT_INDEX_FILE` that [`run_git`] clears would otherwise steer the status
+/// probe away from the fixture and into whatever repository the suite happens
+/// to be running under.
+fn isolate_git_redirection(cmd: &mut assert_cmd::Command) {
+    cmd.env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE");
+}
+
 #[test]
 fn status_snapshot_without_git() {
     let temp_dir = TempDir::new().expect("temp dir");
@@ -32,6 +44,7 @@ fn status_snapshot_without_git() {
         "--socket",
         "/tmp/tmux-demo",
     ]);
+    isolate_git_redirection(&mut cmd);
     let output = cmd.assert().success().get_output().stdout.clone();
     let text = String::from_utf8_lossy(&output).trim().to_owned();
     insta::assert_snapshot!(text);
@@ -60,6 +73,7 @@ fn status_renders_configured_clock() {
         "--pane",
         "%0",
     ]);
+    isolate_git_redirection(&mut cmd);
     let output = cmd.assert().success().get_output().stdout.clone();
     let text = String::from_utf8_lossy(&output).trim().to_owned();
     assert!(text.contains("\u{f017} clock"));
@@ -92,6 +106,7 @@ fn status_snapshot_clean_git_full_width_with_pr() {
         "--socket",
         "/tmp/tmux-demo",
     ]);
+    isolate_git_redirection(&mut cmd);
     let output = cmd.assert().success().get_output().stdout.clone();
     let raw = String::from_utf8_lossy(&output);
 
@@ -137,6 +152,7 @@ fn status_snapshot_dirty_git_default_width() {
         "--socket",
         "/tmp/tmux-demo",
     ]);
+    isolate_git_redirection(&mut cmd);
     let output = cmd.assert().success().get_output().stdout.clone();
     let text = String::from_utf8_lossy(&output).trim_end().to_owned();
     insta::assert_snapshot!(text);
@@ -189,6 +205,13 @@ fn write_file(path: &Utf8PathBuf, name: &str, contents: &str) -> io::Result<()> 
 /// and change what the snapshots record. Pointing both configuration files at
 /// `/dev/null` and setting `GIT_CONFIG_NOSYSTEM` makes the repository depend
 /// only on the arguments below.
+///
+/// The repository redirection variables `GIT_DIR`, `GIT_WORK_TREE` and
+/// `GIT_INDEX_FILE` are cleared for the same reason. A suite run from inside a
+/// git hook or a `git rebase --exec` inherits them, and any one of them would
+/// silently point these commands at the developer's repository instead of the
+/// fixture — `current_dir` alone does not override them. This matches the
+/// isolation `tests/rstest_bdd/status_steps.rs` already applies.
 fn run_git(path: &Utf8PathBuf, args: impl IntoIterator<Item = &'static str>) -> io::Result<()> {
     let status = Command::new("git")
         .args(args)
@@ -196,6 +219,9 @@ fn run_git(path: &Utf8PathBuf, args: impl IntoIterator<Item = &'static str>) -> 
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
         .status()?;
     if status.success() {
         Ok(())

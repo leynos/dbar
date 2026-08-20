@@ -79,11 +79,23 @@ fn command_in_snippet(snippet: &str) -> Option<&str> {
 /// Model of the control-character strip the snippet wraps every slot in.
 ///
 /// tmux's `q` modifier does not escape control characters, so the snippet
-/// substitutes them away *after* quoting. This mirrors that substitution.
+/// substitutes them away *after* quoting. This mirrors that substitution
+/// exactly: the production class is `TMUX_CONTROL_CHARACTERS`, U+0001 to
+/// U+001F plus U+007F, and nothing else. `char::is_control` is deliberately
+/// not used — it is strictly broader, covering U+0000 and the C1 range
+/// U+0080 to U+009F, so a model built on it would claim characters are
+/// stripped that the snippet in fact passes through unchanged, masking a gap
+/// rather than exposing one.
 fn strip_control_characters(value: &str) -> String {
     value
         .chars()
-        .map(|ch| if ch.is_control() { '_' } else { ch })
+        .map(|ch| {
+            if matches!(ch, '\u{1}'..='\u{1f}' | '\u{7f}') {
+                '_'
+            } else {
+                ch
+            }
+        })
         .collect()
 }
 

@@ -21,6 +21,14 @@
 //! | Upstream-count probe failed or was unparseable | ahead and behind both read zero |
 //! | Origin-URL probe exited non-zero (git's answer for "no `origin` remote", including in a plain directory) | the path-derived project name; no degradation recorded |
 //! | Origin-URL probe could not be run at all, or answered with a URL naming nothing | the path-derived project name, with the failure recorded on [`ProjectNameOutcome`] |
+//!
+//! # Trust
+//!
+//! The probed directory is untrusted: it is wherever the user's shell happens
+//! to be, so a repository they merely `cd`-ed into can carry a `.git/config`
+//! that names commands for git to run. Every probe is therefore built by one
+//! spec builder that disables those keys; see `probes::HARDENING_ARGS` for
+//! which, and for why none of them changes what is reported.
 
 use std::fmt;
 
@@ -32,8 +40,11 @@ use crate::types::{AheadCount, BehindCount, BranchName, ProjectName};
 
 mod probes;
 
+/// The spec builder every probe goes through, re-exported so that tests
+/// elsewhere in the crate can construct the exact spec a probe produces
+/// instead of hand-assembling one that would drift from the hardening.
 #[cfg(test)]
-use probes::git_command;
+pub(crate) use probes::git_command;
 use probes::{
     probe_branch, probe_origin_name, probe_repository, probe_upstream_counts, probe_worktree_status,
 };
@@ -309,5 +320,9 @@ fn is_worktree_path(path: &Utf8Path) -> bool {
     value.contains(".worktrees") || value.contains("/.git/worktrees/")
 }
 
+// The fixture arms git with a POSIX shell command and an executable-bit hook,
+// so the vectors it reproduces only exist on unix.
+#[cfg(all(test, unix))]
+mod hardening_tests;
 #[cfg(test)]
 mod tests;

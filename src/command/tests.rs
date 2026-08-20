@@ -1,10 +1,8 @@
 //! Tests for real command execution, timeout handling, output limits, and error mapping.
 //!
-//! Every case spawns a POSIX utility (`printf`, `false`, `sh`, `sleep`), and the
-//! process-group assertions describe Unix semantics, so the module is compiled
-//! only on Unix. The crate itself stays portable: `src/command/mod.rs` keeps its
-//! non-Unix `use_own_process_group` and `signal_process_group` stubs.
-#![cfg(unix)]
+//! Every case spawns a POSIX utility (`printf`, `false`, `sh`, `sleep`) and the
+//! process-group assertions describe Unix semantics, which needs no `cfg` gate:
+//! the crate refuses to build off Unix, as `src/command/mod.rs` explains.
 use super::*;
 use rstest::rstest;
 use std::time::Instant;
@@ -160,6 +158,36 @@ fn run_rejects_stderr_beyond_the_limit() {
     assert!(
         elapsed < Duration::from_secs(5),
         "the child must be killed rather than waited out, took {elapsed:?}"
+    );
+}
+
+#[rstest]
+fn dropping_a_session_terminates_the_child_and_joins_its_readers() {
+    // Every error return between the spawn and the joins now does exactly what
+    // this test does: nothing, and lets the guard clean up. The child stalls far
+    // past the assertion window and backgrounds a grandchild holding the
+    // inherited pipes, so a guard that skipped the group kill would block in the
+    // reader join for the grandchild's whole lifetime, and a guard that returned
+    // before joining would be the leak this replaces. Returning promptly is
+    // therefore only possible if both halves ran.
+    //
+    // The assertion is on elapsed time rather than on the process group still
+    // existing, because the killed grandchild is reparented and reaped
+    // asynchronously: probing the group would race that reap and flake.
+    let mut command = Command::new("sh");
+    command.args(["-c", "sleep 30 & sleep 30"]);
+    capture_output(&mut command);
+    use_own_process_group(&mut command);
+    let mut session = ChildSession::new(command.spawn().expect("sh spawns"));
+    session.start_readers(1024).expect("both readers start");
+
+    let started = Instant::now();
+    drop(session);
+    let elapsed = started.elapsed();
+
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "dropping the session must not wait the child out, took {elapsed:?}"
     );
 }
 

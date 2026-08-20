@@ -165,14 +165,23 @@ which is dedicated to the rendered segment consumed by tmux's `#(...)`.
 Build on the typed diagnostics already collected at the boundaries where the
 crate talks to external systems (`command::CommandRunner::run`,
 `github::GitHubClient::pr_number`, `git::git_status`, `tmux::resolve_context`,
-`cache::load_cached_value`/`store_cached_value`, and `install::install`) by
-routing them through a logging/tracing backend, adding bounded-cardinality
-counters, and measuring latency around each boundary call. This is additive
-to `status::StatusDiagnostics::describe_failures` and the `DBAR_DIAGNOSTICS`
+and `cache::load_cached_value`/`store_cached_value`) by routing them through
+a logging/tracing backend, adding bounded-cardinality counters, and
+measuring latency around each boundary call. This is additive to
+`status::StatusDiagnostics::describe_failures` and the `DBAR_DIAGNOSTICS`
 opt-in text mirror described above, not a replacement for them; the new
 backend should be gated behind its own opt-in mode so the default `dbar
 status` invocation, run every few seconds from tmux, stays within the
 latency budget stated in acceptance criterion 7 below.
+
+`install::install` is deliberately excluded from this scope. It is a
+one-shot, hand-invoked command rather than a boundary polled on every tmux
+refresh, so the latency and counter telemetry motivating this issue add
+little value there; its `InstallOutcome` (`path`, `backup_path`, `snippet`)
+and `InstallError::Io`'s wrapped `std::io::Error` also carry filesystem
+paths and error text that the redaction criterion below (acceptance
+criterion 6) would require stripping before emission, leaving no field left
+worth instrumenting.
 
 ### Acceptance criteria for telemetry
 
@@ -195,8 +204,9 @@ latency budget stated in acceptance criterion 7 below.
    numbers.
 4. Latency is measured around each external boundary call: at minimum,
    `command::RealCommandRunner::run`, `github::GhCliClient::pr_number`,
-   `cache::load_cached_value`, `cache::store_cached_value`, and
-   `install::install`'s filesystem operations.
+   `cache::load_cached_value`, and `cache::store_cached_value`.
+   `install::install` is out of scope for this criterion; see the note in
+   "Proposed instrumentation" above.
 5. The failures already recorded by `status::StatusDiagnostics`
    (cache-directory failures via `status::pr::CacheOutcome::DirUnavailable`,
    cache-read failures via `status::pr::CacheOutcome::ReadFailed`,
