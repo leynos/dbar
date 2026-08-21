@@ -64,11 +64,6 @@ pub struct RenderContext<'a> {
 /// # Examples
 ///
 /// ```text
-/// use dbar::git::GitStatus;
-/// use dbar::render::{RenderContext, render_status_line};
-/// use dbar::tmux::TmuxContext;
-/// use dbar::types::{AheadCount, BehindCount, BranchName, ProjectName};
-///
 /// let project = ProjectName::new("demo");
 /// let git = GitStatus {
 ///     branch: Some(BranchName::new("main")),

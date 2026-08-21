@@ -25,12 +25,10 @@ pub trait GitHubClient {
     ///
     /// ```text
     /// use camino::Utf8Path;
-    /// use dbar::github::{GitHubClient, MockGitHubClient};
     ///
     /// let client = MockGitHubClient::new("42");
     /// let pr = client.pr_number(Utf8Path::new("."), "main")?;
     /// assert!(pr.is_some());
-    /// # Ok::<(), dbar::github::GitHubError>(())
     /// ```
     ///
     /// # Errors
@@ -129,10 +127,7 @@ impl MockGitHubClient {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::github::MockGitHubClient;
-    ///
     /// let client = MockGitHubClient::new("7");
-    /// # let _ = client;
     /// ```
     pub fn new(value: &str) -> Self {
         let trimmed = value.trim();
@@ -168,7 +163,6 @@ impl GitHubClient for MockGitHubClient {
 ///
 /// ```text
 /// use std::time::Duration;
-/// use dbar::command::CommandError;
 ///
 /// let summary = command_failure_category(&CommandError::Timeout {
 ///     timeout: Duration::from_secs(5),

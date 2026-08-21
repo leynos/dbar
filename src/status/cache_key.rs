@@ -74,7 +74,6 @@ fn digest(project_dir: &str, branch: &str) -> u64 {
 ///
 /// ```text
 /// use camino::Utf8Path;
-/// use dbar::status::cache_key::pr_cache_path;
 ///
 /// let path = pr_cache_path(
 ///     Utf8Path::new("/cache"),

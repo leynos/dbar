@@ -111,14 +111,10 @@ pub enum InstallError {
 /// # Examples
 ///
 /// ```text
-/// use dbar::install::{RunMode, Width, install};
-/// use dbar::types::StatusPosition;
-///
 /// // Already resolved; `~` is not expanded by `install`.
 /// let path = dbar::config::default_tmux_config_path();
 /// let outcome = install(Some(path), StatusPosition::Right, RunMode::DryRun, Width::Plain)?;
 /// assert!(outcome.dry_run);
-/// # Ok::<(), dbar::install::InstallError>(())
 /// ```
 pub fn install(
     config_path_opt: Option<Utf8PathBuf>,

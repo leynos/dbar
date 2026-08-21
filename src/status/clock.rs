@@ -17,13 +17,10 @@ use crate::error::DbarError;
 /// # Examples
 ///
 /// ```text
-/// use dbar::config::StatusArgs;
-/// use dbar::status::clock::render_clock;
 /// use mockable::DefaultClock;
 ///
 /// let args = StatusArgs::default();
 /// assert_eq!(render_clock(&args, &DefaultClock)?, None);
-/// # Ok::<(), dbar::DbarError>(())
 /// ```
 ///
 /// # Errors

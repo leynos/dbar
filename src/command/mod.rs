@@ -72,8 +72,6 @@ impl CommandSpec {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::command::CommandSpec;
-    ///
     /// let spec = CommandSpec::new("git");
     /// ```
     pub fn new(program: impl Into<String>) -> Self {
@@ -91,8 +89,6 @@ impl CommandSpec {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::command::CommandSpec;
-    ///
     /// let spec = CommandSpec::new("git").args(["status", "--porcelain"]);
     /// ```
     pub fn args(mut self, args: impl IntoIterator<Item = impl Into<String>>) -> Self {
@@ -106,7 +102,6 @@ impl CommandSpec {
     ///
     /// ```text
     /// use camino::Utf8PathBuf;
-    /// use dbar::command::CommandSpec;
     ///
     /// let spec = CommandSpec::new("git").cwd(Utf8PathBuf::from("."));
     /// ```
@@ -121,7 +116,6 @@ impl CommandSpec {
     ///
     /// ```text
     /// use std::time::Duration;
-    /// use dbar::command::CommandSpec;
     ///
     /// let spec = CommandSpec::new("git").timeout(Duration::from_secs(2));
     /// ```
@@ -135,8 +129,6 @@ impl CommandSpec {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::command::CommandSpec;
-    ///
     /// let spec = CommandSpec::new("git").max_output_bytes(1024);
     /// ```
     pub const fn max_output_bytes(mut self, max_output_bytes: usize) -> Self {

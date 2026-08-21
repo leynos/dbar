@@ -81,7 +81,6 @@ impl SweepContext<'_> {
 /// use mockable::DefaultClock;
 ///
 /// sweep_cache_dir(Utf8Path::new("."), &DefaultClock, CacheTtlSeconds::new(60))?;
-/// # Ok::<(), crate::cache::CacheError>(())
 /// ```
 pub fn sweep_cache_dir(
     dir_path: &Utf8Path,

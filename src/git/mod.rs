@@ -156,8 +156,6 @@ impl GitStatusOutcome {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::git::GitStatusOutcome;
-    ///
     /// assert!(GitStatusOutcome::NotARepository.status().is_none());
     /// ```
     pub const fn status(&self) -> Option<&GitStatus> {
@@ -174,8 +172,6 @@ impl GitStatusOutcome {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::git::GitStatusOutcome;
-    ///
     /// assert!(GitStatusOutcome::NotARepository.into_failures().is_empty());
     /// ```
     pub fn into_failures(self) -> Vec<GitProbeFailure> {

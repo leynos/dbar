@@ -15,8 +15,6 @@ impl ProjectName {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::types::ProjectName;
-    ///
     /// let name = ProjectName::new("dbar");
     /// assert_eq!(name.as_ref(), "dbar");
     /// ```
@@ -47,8 +45,6 @@ impl BranchName {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::types::BranchName;
-    ///
     /// let branch = BranchName::new("main");
     /// assert_eq!(branch.as_ref(), "main");
     /// ```
@@ -79,8 +75,6 @@ impl AheadCount {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::types::AheadCount;
-    ///
     /// let count = AheadCount::new(2);
     /// assert_eq!(count.value(), 2);
     /// ```
@@ -93,8 +87,6 @@ impl AheadCount {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::types::AheadCount;
-    ///
     /// let count = AheadCount::new(1);
     /// assert_eq!(count.value(), 1);
     /// ```
@@ -119,8 +111,6 @@ impl BehindCount {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::types::BehindCount;
-    ///
     /// let count = BehindCount::new(3);
     /// assert_eq!(count.value(), 3);
     /// ```
@@ -133,8 +123,6 @@ impl BehindCount {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::types::BehindCount;
-    ///
     /// let count = BehindCount::new(1);
     /// assert_eq!(count.value(), 1);
     /// ```
@@ -159,8 +147,6 @@ impl PrNumber {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::types::PrNumber;
-    ///
     /// let pr = PrNumber::new("42");
     /// assert_eq!(pr.to_string(), "42");
     /// ```
@@ -185,8 +171,6 @@ impl CacheTtlSeconds {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::types::CacheTtlSeconds;
-    ///
     /// let ttl = CacheTtlSeconds::new(30);
     /// assert_eq!(ttl.value(), 30);
     /// ```
@@ -199,8 +183,6 @@ impl CacheTtlSeconds {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::types::CacheTtlSeconds;
-    ///
     /// let ttl = CacheTtlSeconds::new(5);
     /// assert_eq!(ttl.value(), 5);
     /// ```

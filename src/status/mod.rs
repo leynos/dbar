@@ -60,8 +60,6 @@ impl StatusDiagnostics {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::status::StatusDiagnostics;
-    ///
     /// assert!(StatusDiagnostics::default().describe_failures().is_empty());
     /// ```
     pub fn describe_failures(&self) -> Vec<String> {
@@ -98,7 +96,6 @@ pub struct StatusReport {
 /// for failure in report.diagnostics.describe_failures() {
 ///     eprintln!("{failure}");
 /// }
-/// # Ok::<(), dbar::DbarError>(())
 /// ```
 ///
 /// # Errors

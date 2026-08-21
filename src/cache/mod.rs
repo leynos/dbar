@@ -96,7 +96,6 @@ struct CacheEntry {
 /// use crate::cache::resolve_cache_dir;
 ///
 /// let dir = resolve_cache_dir(None)?;
-/// # Ok::<(), crate::cache::CacheError>(())
 /// ```
 pub fn resolve_cache_dir(override_dir: Option<Utf8PathBuf>) -> Result<Utf8PathBuf, CacheError> {
     if let Some(path) = override_dir {
@@ -128,7 +127,6 @@ pub fn resolve_cache_dir(override_dir: Option<Utf8PathBuf>) -> Result<Utf8PathBu
 /// let clock = DefaultClock;
 /// let value = load_cached_value(Utf8Path::new("cache.json"), &clock, CacheTtlSeconds::new(60))?;
 /// assert!(value.is_none());
-/// # Ok::<(), crate::cache::CacheError>(())
 /// ```
 pub fn load_cached_value(
     path: &Utf8Path,
@@ -166,7 +164,6 @@ pub fn load_cached_value(
 ///
 /// let clock = DefaultClock;
 /// store_cached_value(Utf8Path::new("cache.json"), &clock, "123")?;
-/// # Ok::<(), crate::cache::CacheError>(())
 /// ```
 pub fn store_cached_value(
     path: &Utf8Path,

@@ -116,8 +116,6 @@ impl StatusArgs {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::config::StatusArgs;
-    ///
     /// assert_eq!(StatusArgs::default().clock_format_or_default(), "%H:%M");
     /// ```
     #[must_use]
@@ -131,9 +129,6 @@ impl StatusArgs {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::config::StatusArgs;
-    /// use dbar::types::CacheTtlSeconds;
-    ///
     /// let ttl = StatusArgs::default().pr_cache_ttl_or_default();
     /// assert_eq!(ttl, CacheTtlSeconds::default());
     /// ```
@@ -177,8 +172,6 @@ impl InstallArgs {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::config::InstallArgs;
-    ///
     /// assert!(!InstallArgs::default().is_dry_run());
     /// ```
     #[must_use]
@@ -191,8 +184,6 @@ impl InstallArgs {
     /// # Examples
     ///
     /// ```text
-    /// use dbar::config::InstallArgs;
-    ///
     /// assert!(!InstallArgs::default().is_full());
     /// ```
     #[must_use]
@@ -231,10 +222,7 @@ pub enum DbarCommand {
 /// # Examples
 ///
 /// ```text
-/// use dbar::config::load_command;
-///
 /// let command = load_command()?;
-/// # Ok::<(), std::sync::Arc<ortho_config::OrthoError>>(())
 /// ```
 pub fn load_command() -> Result<DbarCommand, ConfigError> {
     load_command_from(std::env::args_os()).map_err(|err| match err {
