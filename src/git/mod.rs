@@ -155,7 +155,7 @@ impl GitStatusOutcome {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::git::GitStatusOutcome;
     ///
     /// assert!(GitStatusOutcome::NotARepository.status().is_none());
@@ -173,7 +173,7 @@ impl GitStatusOutcome {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::git::GitStatusOutcome;
     ///
     /// assert!(GitStatusOutcome::NotARepository.into_failures().is_empty());
@@ -208,12 +208,9 @@ impl ProjectNameOutcome {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
-    /// use camino::Utf8Path;
-    /// use dbar::command::RealCommandRunner;
-    /// use dbar::git::project_name;
-    ///
-    /// let runner = RealCommandRunner::default();
+    /// ```text
+    /// // `runner` is any `CommandRunner`; a real one spawns `git`, so the
+    /// // tests inject `MockCommandRunner`.
     /// let outcome = project_name(&runner, Utf8Path::new("."));
     /// let _ = outcome.into_failures();
     /// ```
@@ -230,12 +227,9 @@ impl ProjectNameOutcome {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
-/// use camino::Utf8Path;
-/// use dbar::command::RealCommandRunner;
-/// use dbar::git::project_name;
-///
-/// let runner = RealCommandRunner::default();
+/// ```text
+/// // `runner` is any `CommandRunner`; a real one spawns `git`, so the
+/// // tests inject `MockCommandRunner`.
 /// let outcome = project_name(&runner, Utf8Path::new("."));
 /// println!("{}", outcome.name);
 /// ```
@@ -257,12 +251,9 @@ pub fn project_name(runner: &dyn CommandRunner, project_dir: &Utf8Path) -> Proje
 ///
 /// # Examples
 ///
-/// ```rust,ignore
-/// use camino::Utf8Path;
-/// use dbar::command::RealCommandRunner;
-/// use dbar::git::git_status;
-///
-/// let runner = RealCommandRunner::default();
+/// ```text
+/// // `runner` is any `CommandRunner`; a real one spawns `git`, so the
+/// // tests inject `MockCommandRunner`.
 /// let outcome = git_status(&runner, Utf8Path::new("."));
 /// let _ = outcome.status();
 /// ```

@@ -23,7 +23,7 @@ pub trait GitHubClient {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use camino::Utf8Path;
     /// use dbar::github::{GitHubClient, MockGitHubClient};
     ///
@@ -53,13 +53,10 @@ impl<'a> GhCliClient<'a> {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
-    /// use dbar::command::RealCommandRunner;
-    /// use dbar::github::GhCliClient;
-    ///
-    /// let runner = RealCommandRunner::default();
-    /// let client = GhCliClient::new(&runner);
-    /// # let _ = client;
+    /// ```text
+    /// // `runner` is any `CommandRunner`; a real one invokes the `gh`
+    /// // binary, so tests inject `MockCommandRunner`.
+    /// let client = GhCliClient::new(runner);
     /// ```
     pub fn new(runner: &'a dyn CommandRunner) -> Self {
         Self { runner }
@@ -131,7 +128,7 @@ impl MockGitHubClient {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::github::MockGitHubClient;
     ///
     /// let client = MockGitHubClient::new("7");
@@ -169,7 +166,7 @@ impl GitHubClient for MockGitHubClient {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// use std::time::Duration;
 /// use dbar::command::CommandError;
 ///

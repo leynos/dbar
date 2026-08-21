@@ -146,13 +146,11 @@ impl TmuxResolution {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
-    /// use dbar::command::RealCommandRunner;
-    /// use dbar::tmux::{resolve_context, TmuxContext};
-    ///
-    /// let runner = RealCommandRunner::default();
-    /// let resolution = resolve_context(&runner, TmuxContext::default());
-    /// let _ = resolution.into_failures();
+    /// ```text
+    /// // `runner` is any `CommandRunner`; the tests use `MockCommandRunner`
+    /// // so that no tmux server is contacted.
+    /// let resolution = resolve_context(runner, TmuxContext::default());
+    /// let failures = resolution.into_failures();
     /// ```
     pub fn into_failures(self) -> Vec<TmuxProbeFailure> {
         match self.outcome {
@@ -169,13 +167,11 @@ impl TmuxResolution {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
-/// use dbar::command::RealCommandRunner;
-/// use dbar::tmux::{resolve_context, TmuxContext};
-///
-/// let runner = RealCommandRunner::default();
-/// let resolution = resolve_context(&runner, TmuxContext::default());
-/// let _ = resolution.context.session;
+/// ```text
+/// // `runner` is any `CommandRunner`. Passing a real one here would query a
+/// // live tmux server, so the tests inject `MockCommandRunner` instead.
+/// let resolution = resolve_context(runner, TmuxContext::default());
+/// let session = resolution.context.session;
 /// ```
 pub fn resolve_context(runner: &dyn CommandRunner, context: TmuxContext) -> TmuxResolution {
     if context.is_complete() {

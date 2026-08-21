@@ -115,7 +115,7 @@ impl StatusArgs {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::config::StatusArgs;
     ///
     /// assert_eq!(StatusArgs::default().clock_format_or_default(), "%H:%M");
@@ -130,7 +130,7 @@ impl StatusArgs {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::config::StatusArgs;
     /// use dbar::types::CacheTtlSeconds;
     ///
@@ -176,7 +176,7 @@ impl InstallArgs {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::config::InstallArgs;
     ///
     /// assert!(!InstallArgs::default().is_dry_run());
@@ -190,7 +190,7 @@ impl InstallArgs {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::config::InstallArgs;
     ///
     /// assert!(!InstallArgs::default().is_full());
@@ -230,7 +230,7 @@ pub enum DbarCommand {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// use dbar::config::load_command;
 ///
 /// let command = load_command()?;

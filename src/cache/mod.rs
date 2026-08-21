@@ -92,7 +92,7 @@ struct CacheEntry {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// use crate::cache::resolve_cache_dir;
 ///
 /// let dir = resolve_cache_dir(None)?;
@@ -119,7 +119,7 @@ pub fn resolve_cache_dir(override_dir: Option<Utf8PathBuf>) -> Result<Utf8PathBu
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// use camino::Utf8Path;
 /// use crate::cache::load_cached_value;
 /// use mockable::DefaultClock;
@@ -159,7 +159,7 @@ pub fn load_cached_value(
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// use camino::Utf8Path;
 /// use crate::cache::store_cached_value;
 /// use mockable::DefaultClock;

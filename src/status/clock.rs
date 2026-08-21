@@ -16,7 +16,7 @@ use crate::error::DbarError;
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// use dbar::config::StatusArgs;
 /// use dbar::status::clock::render_clock;
 /// use mockable::DefaultClock;

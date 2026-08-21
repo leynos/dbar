@@ -72,7 +72,7 @@ fn digest(project_dir: &str, branch: &str) -> u64 {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// use camino::Utf8Path;
 /// use dbar::status::cache_key::pr_cache_path;
 ///

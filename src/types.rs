@@ -14,7 +14,7 @@ impl ProjectName {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::types::ProjectName;
     ///
     /// let name = ProjectName::new("dbar");
@@ -46,7 +46,7 @@ impl BranchName {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::types::BranchName;
     ///
     /// let branch = BranchName::new("main");
@@ -78,7 +78,7 @@ impl AheadCount {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::types::AheadCount;
     ///
     /// let count = AheadCount::new(2);
@@ -92,7 +92,7 @@ impl AheadCount {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::types::AheadCount;
     ///
     /// let count = AheadCount::new(1);
@@ -118,7 +118,7 @@ impl BehindCount {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::types::BehindCount;
     ///
     /// let count = BehindCount::new(3);
@@ -132,7 +132,7 @@ impl BehindCount {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::types::BehindCount;
     ///
     /// let count = BehindCount::new(1);
@@ -158,7 +158,7 @@ impl PrNumber {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::types::PrNumber;
     ///
     /// let pr = PrNumber::new("42");
@@ -184,7 +184,7 @@ impl CacheTtlSeconds {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::types::CacheTtlSeconds;
     ///
     /// let ttl = CacheTtlSeconds::new(30);
@@ -198,7 +198,7 @@ impl CacheTtlSeconds {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::types::CacheTtlSeconds;
     ///
     /// let ttl = CacheTtlSeconds::new(5);

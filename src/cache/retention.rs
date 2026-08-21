@@ -74,7 +74,7 @@ impl SweepContext<'_> {
 /// `DbarError` — so this example is written against the in-crate path and is
 /// `ignore`d rather than compiled.
 ///
-/// ```rust,ignore
+/// ```text
 /// use camino::Utf8Path;
 /// use crate::cache::retention::sweep_cache_dir;
 /// use crate::types::CacheTtlSeconds;

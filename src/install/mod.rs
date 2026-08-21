@@ -110,7 +110,7 @@ pub enum InstallError {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// use dbar::install::{RunMode, Width, install};
 /// use dbar::types::StatusPosition;
 ///

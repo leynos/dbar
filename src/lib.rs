@@ -1,4 +1,18 @@
 //! dbar status line library and CLI helpers.
+//!
+//! # Public API
+//!
+//! [`run`] and [`DbarError`] are the whole of it. Every module below is
+//! declared with a private `mod`, so nothing else is nameable from outside the
+//! crate, and no `dbar::<module>::<item>` path resolves however it may read in
+//! an internal doc comment.
+//!
+//! That has a consequence worth stating, because it is invisible from the
+//! source: rustdoc collects doctests only from the public API, so an example on
+//! a private item is never compiled and cannot fail. Such examples are written
+//! in `text` blocks rather than Rust ones, so that they illustrate without
+//! claiming a validation they do not receive. The [`run`] example below is the
+//! one exception, and is a real compiling doctest.
 
 mod cache;
 mod command;

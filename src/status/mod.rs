@@ -59,7 +59,7 @@ impl StatusDiagnostics {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::status::StatusDiagnostics;
     ///
     /// assert!(StatusDiagnostics::default().describe_failures().is_empty());
@@ -88,16 +88,11 @@ pub struct StatusReport {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
-/// use dbar::command::RealCommandRunner;
-/// use dbar::config::StatusArgs;
-/// use dbar::github::GhCliClient;
-/// use dbar::status::build_status_report;
-/// use mockable::DefaultClock;
-///
+/// ```text
+/// // `runner` is any `CommandRunner`; a real one spawns `git` and `gh`,
+/// // so the tests inject `MockCommandRunner` instead.
 /// let args = StatusArgs::default();
-/// let runner = RealCommandRunner::default();
-/// let github = GhCliClient::new(&runner);
+/// let github = GhCliClient::new(runner);
 /// let clock = DefaultClock;
 /// let report = build_status_report(&args, &runner, &clock, &github)?;
 /// for failure in report.diagnostics.describe_failures() {

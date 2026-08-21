@@ -63,7 +63,7 @@ pub struct RenderContext<'a> {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// use dbar::git::GitStatus;
 /// use dbar::render::{RenderContext, render_status_line};
 /// use dbar::tmux::TmuxContext;

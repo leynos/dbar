@@ -144,7 +144,7 @@ impl PrLookupReport {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::status::pr::{CacheOutcome, CacheWriteOutcome, PersistSkipReason,
     ///     PrLookupReport, PrResolution};
     ///
@@ -186,7 +186,7 @@ impl PrLookupReport {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// use dbar::status::pr::pr_from_cache_entry;
 ///
 /// assert!(pr_from_cache_entry(String::new()).is_none());
@@ -208,7 +208,7 @@ pub fn pr_from_cache_entry(value: String) -> Option<PrNumber> {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// use dbar::status::pr::{decide, PersistRequest, PrResolution};
 ///
 /// let decision = decide(Ok(None), "pr/7");
@@ -258,7 +258,7 @@ fn decide_without_a_pr(branch: &str) -> PrDecision {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```text
 /// use dbar::status::pr::pr_from_branch;
 ///
 /// assert!(pr_from_branch("pull-12").is_some());

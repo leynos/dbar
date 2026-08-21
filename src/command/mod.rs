@@ -71,7 +71,7 @@ impl CommandSpec {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::command::CommandSpec;
     ///
     /// let spec = CommandSpec::new("git");
@@ -90,7 +90,7 @@ impl CommandSpec {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::command::CommandSpec;
     ///
     /// let spec = CommandSpec::new("git").args(["status", "--porcelain"]);
@@ -104,7 +104,7 @@ impl CommandSpec {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use camino::Utf8PathBuf;
     /// use dbar::command::CommandSpec;
     ///
@@ -119,7 +119,7 @@ impl CommandSpec {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use std::time::Duration;
     /// use dbar::command::CommandSpec;
     ///
@@ -134,7 +134,7 @@ impl CommandSpec {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```text
     /// use dbar::command::CommandSpec;
     ///
     /// let spec = CommandSpec::new("git").max_output_bytes(1024);
@@ -192,10 +192,9 @@ pub trait CommandRunner {
     ///
     /// # Examples
     ///
-    /// ```rust,ignore
-    /// use dbar::command::{CommandRunner, CommandSpec, RealCommandRunner};
-    ///
-    /// let runner = RealCommandRunner::default();
+    /// ```text
+    /// // `runner` is any implementor. The production one spawns a real
+    /// // process, so tests use `MockCommandRunner`.
     /// let spec = CommandSpec::new("true");
     /// let output = runner.run(&spec);
     /// assert!(output.is_ok());
