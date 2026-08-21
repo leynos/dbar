@@ -424,8 +424,8 @@ names (`DbarConfig`, `StatusContext`/`StatusLine`, `GitProbe`, `TmuxProbe`,
 `TmuxInstaller`) that were never implemented.
 
 Revised 2026-08-14 to correct `config::load_command`'s error type from
-`Arc<OrthoError>` to `ConfigError` (with its `Cli`/`Merge` variants), and to
-drop the `dbar::` module-path prefix from "Interfaces and dependencies"
-since every module in `src/lib.rs` is declared with a private `mod`; the
-only public crate surface is `dbar::run()` and the re-exported
-`dbar::DbarError`.
+`Arc<OrthoError>` to `ConfigError` (with its `Cli`, `Merge` and
+`InvalidClockFormat(String)` variants), and to drop the `dbar::`
+module-path prefix from "Interfaces and dependencies" since every module
+in `src/lib.rs` is declared with a private `mod`; the only public crate
+surface is `dbar::run()` and the re-exported `dbar::DbarError`.
