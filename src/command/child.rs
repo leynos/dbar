@@ -52,7 +52,13 @@ fn spawn_reader(
         let ceiling = u64::try_from(limit)
             .map_err(|_| io::Error::other("output limit does not fit in a byte count"))?;
         let mut buffer = Vec::new();
-        pipe.by_ref().take(ceiling + 1).read_to_end(&mut buffer)?;
+        // Saturating rather than checked: at `u64::MAX` the sentinel byte is
+        // meaningless, because no stream can overrun a ceiling that large, so
+        // clamping reads everything the child produces. Wrapping instead would
+        // take(0) and silently capture nothing.
+        pipe.by_ref()
+            .take(ceiling.saturating_add(1))
+            .read_to_end(&mut buffer)?;
         if buffer.len() > limit {
             // Release the oversized payload before doing anything else; it must
             // not be retained or handed back to the caller.
@@ -66,11 +72,33 @@ fn spawn_reader(
     })
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Counts the readers joined on the current thread, so that a test can
+    /// assert a dropped session collected its threads instead of abandoning
+    /// them.
+    ///
+    /// Thread-local rather than global because every join runs on the thread
+    /// that owns the session — the joining thread in `Drop` is the dropping
+    /// thread — so per-thread counting needs no coordination between tests
+    /// running concurrently.
+    static READERS_JOINED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many readers this thread has joined so far.
+#[cfg(test)]
+pub(super) fn readers_joined() -> usize {
+    READERS_JOINED.with(std::cell::Cell::get)
+}
+
 /// Collect a reader thread's outcome.
 fn join_reader(handle: JoinHandle<io::Result<ReadOutcome>>) -> Result<ReadOutcome, CommandError> {
-    let outcome = handle
-        .join()
-        .map_err(|_| io::Error::other("output reader thread panicked"))??;
+    let joined = handle.join();
+    // Counted before the failure paths below, because a panicked reader has
+    // still been collected rather than left running.
+    #[cfg(test)]
+    READERS_JOINED.with(|count| count.set(count.get().saturating_add(1)));
+    let outcome = joined.map_err(|_| io::Error::other("output reader thread panicked"))??;
     Ok(outcome)
 }
 

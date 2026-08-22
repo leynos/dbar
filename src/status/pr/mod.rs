@@ -145,8 +145,6 @@ impl PrLookupReport {
     /// # Examples
     ///
     /// ```text
-    ///     PrLookupReport, PrResolution};
-    ///
     /// let report = PrLookupReport {
     ///     pr_number: None,
     ///     cache: CacheOutcome::Miss,

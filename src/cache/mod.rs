@@ -2,9 +2,13 @@
 //!
 //! Entries are keyed by a hash of the project directory and branch, so a
 //! long-lived checkout accumulates one file per branch it has ever had. To
-//! keep that bounded, a read that finds an expired entry also runs a bounded
-//! retention sweep over the containing directory; see [`sweep_cache_dir`] for
-//! the policy and for the explicit maintenance entry point.
+//! keep that bounded, expired entries are reclaimed by [`sweep_cache_dir`].
+//!
+//! Reads never delete. [`load_cached_value`] reports expiry as
+//! [`CacheLookup::Expired`] and leaves the file in place; the caller — which
+//! has just learned it must perform a fresh lookup anyway — invokes the sweep
+//! itself, so the deletion is visible at the call site rather than hidden
+//! behind a `load_*` name.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -20,7 +24,7 @@ use crate::types::CacheTtlSeconds;
 
 mod retention;
 
-use retention::sweep_cache_dir;
+pub use retention::sweep_cache_dir;
 
 /// Disambiguates temp-file names for concurrent writers within one process.
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -59,10 +63,9 @@ pub enum CacheError {
     },
     /// Reclaiming expired cache entries failed.
     ///
-    /// This is reported instead of `Ok(None)` on a cache miss caused by
-    /// expiry, so the cached value itself is never at stake: callers may log
-    /// it and carry on with a fresh lookup rather than failing the status
-    /// line.
+    /// Only [`sweep_cache_dir`] produces this; the cached value itself is
+    /// never at stake, so callers may log it and carry on with the fresh
+    /// lookup that prompted the sweep rather than failing the status line.
     #[error("cache retention sweep failed for {path}: {source}")]
     Retention {
         /// The directory or entry the sweep was working on.
@@ -105,38 +108,54 @@ pub fn resolve_cache_dir(override_dir: Option<Utf8PathBuf>) -> Result<Utf8PathBu
     Utf8PathBuf::from_path_buf(dirs.cache_dir().to_path_buf()).map_err(|_| CacheError::InvalidUtf8)
 }
 
-/// Load a cached value if it is still within its TTL, reclaiming expired
-/// entries on the way.
+/// What a cache read found at a path.
 ///
-/// This is a read-through with maintenance, not a pure read: finding an
-/// expired entry also runs [`sweep_cache_dir`] over the containing directory,
-/// which removes expired dbar-owned entries. That path is already committed to
-/// a fresh upstream lookup, so the cost lands where a lookup was going to be
-/// paid anyway; an ordinary cache hit touches nothing. A sweep failure is
-/// reported as [`CacheError::Retention`] in place of the `Ok(None)` the expiry
-/// would otherwise produce.
+/// Expiry is reported rather than acted on: nothing here removes a file, so a
+/// caller that wants an expired entry reclaimed calls [`sweep_cache_dir`]
+/// explicitly.
+#[derive(Debug)]
+pub enum CacheLookup {
+    /// An entry that is still within its TTL, with its cached value.
+    Fresh(String),
+    /// An entry that exists but has outlived its TTL. It is left on disk.
+    Expired,
+    /// No entry exists at the path.
+    Missing,
+}
+
+/// Load a cached value if it is still within its TTL.
+///
+/// This is a pure read: no file is created, modified, or removed on any path
+/// through it. An entry past its TTL yields [`CacheLookup::Expired`] and stays
+/// on disk; reclaiming it is [`sweep_cache_dir`]'s job, invoked by whoever
+/// decided to do the fresh lookup.
 ///
 /// # Examples
 ///
 /// ```text
 /// use camino::Utf8Path;
-/// use crate::cache::load_cached_value;
+/// use crate::cache::{CacheLookup, load_cached_value};
 /// use mockable::DefaultClock;
 /// use crate::types::CacheTtlSeconds;
 ///
 /// let clock = DefaultClock;
-/// let value = load_cached_value(Utf8Path::new("cache.json"), &clock, CacheTtlSeconds::new(60))?;
-/// assert!(value.is_none());
+/// let found = load_cached_value(Utf8Path::new("cache.json"), &clock, CacheTtlSeconds::new(60))?;
+/// assert!(matches!(found, CacheLookup::Missing));
 /// ```
+///
+/// # Errors
+///
+/// Returns an error if the entry cannot be read, exceeds
+/// [`MAX_ENTRY_BYTES`], or does not deserialize.
 pub fn load_cached_value(
     path: &Utf8Path,
     clock: &dyn Clock,
     ttl: CacheTtlSeconds,
-) -> Result<Option<String>, CacheError> {
+) -> Result<CacheLookup, CacheError> {
     let contents = match read_to_string(path) {
         Ok(value) => value,
         Err(CacheError::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(None);
+            return Ok(CacheLookup::Missing);
         }
         Err(err) => return Err(err),
     };
@@ -144,13 +163,9 @@ pub fn load_cached_value(
     let now = to_epoch_seconds(clock.utc().timestamp())?;
     let age = now.saturating_sub(entry.updated_at);
     if age > ttl.value() {
-        // The one write this read performs, named at the call site rather than
-        // hidden behind the load: expiry implies a fresh upstream lookup, so
-        // the reclamation is paid here or not at all.
-        sweep_cache_dir(parent_of(path), clock, ttl)?;
-        return Ok(None);
+        return Ok(CacheLookup::Expired);
     }
-    Ok(Some(entry.value))
+    Ok(CacheLookup::Fresh(entry.value))
 }
 
 /// Store a cache entry, replacing any existing value.
@@ -248,5 +263,7 @@ const fn to_epoch_seconds(timestamp: i64) -> Result<u64, CacheError> {
     Ok(timestamp.unsigned_abs())
 }
 
+#[cfg(test)]
+mod concurrency_tests;
 #[cfg(test)]
 mod tests;

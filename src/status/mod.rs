@@ -20,7 +20,7 @@ use std::io::{self, ErrorKind};
 use camino::{Utf8Path, Utf8PathBuf};
 use mockable::Clock;
 
-use crate::cache;
+use crate::cache::{self, CacheLookup};
 use crate::command::CommandRunner;
 use crate::config::StatusArgs;
 use crate::error::DbarError;
@@ -28,6 +28,7 @@ use crate::git::{self, GitProbeFailure};
 use crate::github::GitHubClient;
 use crate::render;
 use crate::tmux::{self, TmuxContext, TmuxProbeFailure};
+use crate::types::CacheTtlSeconds;
 
 pub mod cache_key;
 pub mod clock;
@@ -201,28 +202,52 @@ fn resolve_pr_number(context: &PrLookup<'_>) -> PrLookupReport {
     match cache::resolve_cache_dir(context.args.cache_dir.clone()) {
         Ok(dir) => {
             let path = pr_cache_path(&dir, context.project_dir, context.branch);
-            resolve_with_cache(context, &path)
+            resolve_with_cache(context, &dir, &path)
         }
         Err(error) => resolve_without_cache(context, CacheOutcome::DirUnavailable(error)),
     }
 }
 
 /// Consult the cache, then fall through to a lookup if it did not answer.
-fn resolve_with_cache(context: &PrLookup<'_>, path: &Utf8Path) -> PrLookupReport {
+///
+/// The read itself never deletes anything. When it reports an expired entry
+/// this boundary — having just decided to go upstream — calls
+/// [`cache::sweep_cache_dir`] itself, so the reclamation is visible here
+/// rather than hidden inside the load.
+fn resolve_with_cache(context: &PrLookup<'_>, dir: &Utf8Path, path: &Utf8Path) -> PrLookupReport {
     // Absent when no layer set a TTL, so the documented default is applied
     // after merging; a clap default would shadow the lower layers.
     let ttl = context.args.pr_cache_ttl_or_default();
     match cache::load_cached_value(path, context.clock, ttl) {
-        Ok(Some(value)) => PrLookupReport {
+        Ok(CacheLookup::Fresh(value)) => PrLookupReport {
             pr_number: pr::pr_from_cache_entry(value),
             cache: CacheOutcome::Hit,
             resolution: PrResolution::FromCache,
             write: CacheWriteOutcome::Skipped(PersistSkipReason::ServedFromCache),
         },
-        Ok(None) => lookup_and_persist(context, CacheOutcome::Miss, Some(path)),
+        Ok(CacheLookup::Missing) => lookup_and_persist(context, CacheOutcome::Miss, Some(path)),
+        Ok(CacheLookup::Expired) => {
+            let outcome = reclaim_expired_entries(context, dir, ttl);
+            lookup_and_persist(context, outcome, Some(path))
+        }
         // A corrupt or unreadable entry is treated as a miss for rendering
         // purposes, but the read failure is carried into the report.
         Err(error) => lookup_and_persist(context, CacheOutcome::ReadFailed(error), Some(path)),
+    }
+}
+
+/// Reclaim expired cache entries now that a fresh lookup is unavoidable.
+///
+/// An expired read is a miss whatever the sweep does, so a sweep failure is
+/// reported alongside the miss rather than allowed to fail the status line.
+fn reclaim_expired_entries(
+    context: &PrLookup<'_>,
+    dir: &Utf8Path,
+    ttl: CacheTtlSeconds,
+) -> CacheOutcome {
+    match cache::sweep_cache_dir(dir, context.clock, ttl) {
+        Ok(()) => CacheOutcome::Miss,
+        Err(error) => CacheOutcome::ReadFailed(error),
     }
 }
 
@@ -271,5 +296,9 @@ fn persist(
 
 #[cfg(test)]
 mod branch_tests;
+#[cfg(test)]
+mod diagnostics_tests;
+#[cfg(test)]
+mod retention_tests;
 #[cfg(test)]
 mod tests;

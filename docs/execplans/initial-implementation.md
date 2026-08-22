@@ -394,7 +394,8 @@ Delivered dependencies:
   `thiserror`, `directories`, `mockable`, `clap`, `rustix`,
   `unicode-width`, `wait-timeout`
 - dev: `rstest`, `rstest-bdd`, `rstest-bdd-macros`, `assert_cmd`, `insta`,
-  `tempfile`
+  `tempfile`, `mockall` (mandatory for the `CommandRunner`/`GitHubClient`
+  seams, not an optional convenience), `proptest` (property tests)
 
 ## Revision note (required when editing an ExecPlan)
 
@@ -416,6 +417,9 @@ progress updates.
 Revised 2026-01-05 to mark the plan complete with final outcomes.
 
 Revised 2026-01-05 to document the pane current path update.
+
+Revised 2026-08-22 to add `mockall` and `proptest` to the delivered
+dev-dependency list, which had omitted them.
 
 Revised 2026-08-01 to correct "Interfaces and dependencies" so it lists the
 delivered `CommandRunner`/`GitHubClient` interfaces, free-function probing

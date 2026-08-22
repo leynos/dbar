@@ -9,6 +9,10 @@ indicator, tmux session details, and an optional clock. It outputs tmux
 
 ## Quick start
 
+dbar runs on Unix only; it relies on POSIX process groups and `flock`, so it
+will not build or run on Windows. tmux itself is a Unix tool, so this is not a
+practical limitation for its intended use.
+
 Build and run from a git repository:
 
 ```sh

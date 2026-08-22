@@ -2,15 +2,12 @@
 //! and the decision (including persistence) for every lookup outcome.
 
 use super::*;
-use crate::command::CommandError;
+use crate::github::CommandFailure;
 use rstest::rstest;
 
 /// A stand-in for a failed `gh` invocation.
 fn lookup_failure() -> GitHubError {
-    GitHubError::Command(CommandError::NonZero {
-        status: Some(1),
-        stderr: "gh failed".to_owned(),
-    })
+    GitHubError::Command(CommandFailure::ExitStatus(1))
 }
 
 /// Render a decision's PR number for comparison.

@@ -36,7 +36,7 @@ from `run()` based on the parsed `DbarCommand`.
   `GitStatus` snapshot alongside any field-level `GitProbeFailure`s the
   fallback policy absorbed. See the module's fallback-policy table for what
   each outcome renders.
-- `github.rs` — the `GitHubClient` trait and its two implementations,
+- `github/mod.rs` — the `GitHubClient` trait and its two implementations,
   `GhCliClient` (backed by the `gh` CLI via `CommandRunner`) and
   `MockGitHubClient` (a fixed value, wired up when `--github-mock-pr` is
   supplied).
@@ -196,7 +196,7 @@ Two expectation styles are in use, and either is fine so long as the test
 reads clearly:
 
 - One expectation per spec, keyed by `with(predicate::eq(spec))`, as in
-  `src/github.rs` and `src/tmux/tests.rs`. This makes the specification itself
+  `src/github/` and `src/tmux/tests.rs`. This makes the specification itself
   an assertion, because a query built from the wrong arguments matches nothing
   and fails the test.
 - A single expectation whose closure switches on the spec it is handed, as in

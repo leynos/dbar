@@ -41,7 +41,7 @@ adapter:
 `src/command.rs` already models the adapter boundary reasonably well: the
 `CommandRunner` trait separates the domain need ("run this command and
 capture its output") from `RealCommandRunner`'s process-spawning
-implementation, and `src/github.rs`'s `GitHubClient` trait does the same for
+implementation, and `src/github/`'s `GitHubClient` trait does the same for
 PR lookups (`GhCliClient` versus `MockGitHubClient`). Both are useful
 reference points for what a clean boundary looks like elsewhere in the
 crate.

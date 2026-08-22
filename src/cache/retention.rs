@@ -2,9 +2,11 @@
 //!
 //! Entries are keyed by a hash of the project directory and branch, so a
 //! long-lived checkout accumulates one file per branch it has ever had.
-//! [`sweep_cache_dir`] is the explicit entry point that reclaims them; it is
-//! also what the expired-read path in [`super::load_cached_value`] calls, so a
-//! backlog is cleared without needing a scheduled job.
+//! [`sweep_cache_dir`] is the sole entry point that reclaims them. It never
+//! runs behind a read: [`super::load_cached_value`] only reports expiry, and
+//! the caller invokes the sweep explicitly once it has decided on a fresh
+//! lookup, so a backlog is cleared without needing a scheduled job and every
+//! deletion is visible at a call site.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::ambient_authority;
@@ -71,8 +73,10 @@ impl SweepContext<'_> {
 /// # Examples
 ///
 /// The `cache` module is crate-internal — `dbar` exposes only `run` and
-/// `DbarError` — so this example is written against the in-crate path and is
-/// `ignore`d rather than compiled.
+/// `DbarError` — so this example is written against the in-crate path.
+/// rustdoc collects doctests only from the public API, so an example on a
+/// private item such as this one is never compiled; it is rendered as text
+/// rather than run.
 ///
 /// ```text
 /// use camino::Utf8Path;
@@ -99,7 +103,7 @@ pub fn sweep_cache_dir(
 
 /// Reclaim expired dbar cache entries, doing bounded work.
 ///
-/// Called from [`sweep_cache_dir`] and from the expired-read path, which is
+/// Called from [`sweep_cache_dir`], which callers invoke only once they are
 /// already committed to a fresh upstream lookup, so the common cache-hit path
 /// never scans the directory. One run lists at most [`SWEEP_LIST_LIMIT`] names,
 /// opens at most [`SWEEP_INSPECT_LIMIT`] of them, and removes at most

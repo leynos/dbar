@@ -1,10 +1,13 @@
 //! Tests for the status boundary: the cache read/write it performs around the
 //! PR policy, the typed report it produces for every failure path, clock
 //! rendering, and the assembled status line's diagnostics.
+//!
+//! The sibling `retention_tests` module covers the explicit retention sweep,
+//! and shares the stubs and helpers below.
 
 use super::*;
 use crate::command::{CommandError, MockCommandRunner};
-use crate::github::GitHubError;
+use crate::github::{CommandFailure, GitHubError};
 use crate::types::{CacheTtlSeconds, PrNumber};
 use camino::Utf8Path;
 use mockable::DefaultClock;
@@ -15,7 +18,7 @@ use tempfile::TempDir;
 
 /// What a stubbed GitHub lookup should answer with.
 #[derive(Debug, Clone, Copy)]
-enum Reply {
+pub(super) enum Reply {
     /// Return this PR number.
     Found(&'static str),
     /// Report that the branch has no PR.
@@ -25,13 +28,13 @@ enum Reply {
 }
 
 /// A GitHub client with a canned answer that counts how often it is consulted.
-struct StubGitHubClient {
+pub(super) struct StubGitHubClient {
     reply: Reply,
-    calls: Cell<usize>,
+    pub(super) calls: Cell<usize>,
 }
 
 impl StubGitHubClient {
-    const fn new(reply: Reply) -> Self {
+    pub(super) const fn new(reply: Reply) -> Self {
         Self {
             reply,
             calls: Cell::new(0),
@@ -49,10 +52,7 @@ impl GitHubClient for StubGitHubClient {
         match self.reply {
             Reply::Found(value) => Ok(Some(PrNumber::new(value))),
             Reply::NoPr => Ok(None),
-            Reply::Failure => Err(GitHubError::Command(CommandError::NonZero {
-                status: Some(1),
-                stderr: "gh failed".to_owned(),
-            })),
+            Reply::Failure => Err(GitHubError::Command(CommandFailure::ExitStatus(1))),
         }
     }
 }
@@ -62,7 +62,7 @@ impl GitHubClient for StubGitHubClient {
 /// `times(1..)` rather than a bare `returning`: the point of the test that uses
 /// it is that the probes really are attempted and their failures absorbed, so a
 /// status line assembled without running anything must not pass.
-fn failing_runner() -> MockCommandRunner {
+pub(super) fn failing_runner() -> MockCommandRunner {
     let mut runner = MockCommandRunner::new();
     runner.expect_run().times(1..).returning(|_| {
         Err(CommandError::NonZero {
@@ -74,10 +74,10 @@ fn failing_runner() -> MockCommandRunner {
 }
 
 /// The project directory every PR lookup in these tests is scoped to.
-const PROJECT_DIR: &str = "/projects/demo";
+pub(super) const PROJECT_DIR: &str = "/projects/demo";
 
 /// The branch every PR lookup in these tests is scoped to.
-const BRANCH: &str = "pr/7";
+pub(super) const BRANCH: &str = "pr/7";
 
 /// A temporary directory and its UTF-8 path, used as the cache root.
 ///
@@ -85,14 +85,14 @@ const BRANCH: &str = "pr/7";
 /// directory, so a test must hold the guard for as long as it uses the path.
 /// A tuple keeps that ownership requirement visible at every call site.
 #[fixture]
-fn cache_root() -> io::Result<(TempDir, Utf8PathBuf)> {
+pub(super) fn cache_root() -> io::Result<(TempDir, Utf8PathBuf)> {
     let dir = TempDir::new()?;
     let path = utf8_path(&dir)?;
     Ok((dir, path))
 }
 
 /// Build status arguments pointing at the given cache directory.
-fn args_with_cache(cache_dir: &Utf8Path) -> StatusArgs {
+pub(super) fn args_with_cache(cache_dir: &Utf8Path) -> StatusArgs {
     StatusArgs {
         cache_dir: Some(cache_dir.to_path_buf()),
         pr_cache_ttl_seconds: Some(CacheTtlSeconds::new(60)),
@@ -101,13 +101,13 @@ fn args_with_cache(cache_dir: &Utf8Path) -> StatusArgs {
 }
 
 /// Convert a temporary directory into a UTF-8 path.
-fn utf8_path(temp_dir: &TempDir) -> io::Result<Utf8PathBuf> {
+pub(super) fn utf8_path(temp_dir: &TempDir) -> io::Result<Utf8PathBuf> {
     Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "temp dir path is not UTF-8"))
 }
 
 /// Write raw bytes at a cache path, bypassing the cache's own encoding.
-fn write_raw(path: &Utf8Path, contents: &str) -> io::Result<()> {
+pub(super) fn write_raw(path: &Utf8Path, contents: &str) -> io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Utf8Path::new("."));
     let name = path
         .file_name()
@@ -117,7 +117,7 @@ fn write_raw(path: &Utf8Path, contents: &str) -> io::Result<()> {
 }
 
 /// Report whether a path exists, without reaching for `std::fs`.
-fn exists(path: &Utf8Path) -> bool {
+pub(super) fn exists(path: &Utf8Path) -> bool {
     let Some(parent) = path.parent() else {
         return false;
     };
@@ -129,7 +129,11 @@ fn exists(path: &Utf8Path) -> bool {
 }
 
 /// Run a PR lookup against the given cache directory and GitHub stub.
-fn lookup(args: &StatusArgs, github: &dyn GitHubClient, clock: &dyn Clock) -> PrLookupReport {
+pub(super) fn lookup(
+    args: &StatusArgs,
+    github: &dyn GitHubClient,
+    clock: &dyn Clock,
+) -> PrLookupReport {
     resolve_pr_number(&PrLookup {
         args,
         clock,
@@ -140,7 +144,7 @@ fn lookup(args: &StatusArgs, github: &dyn GitHubClient, clock: &dyn Clock) -> Pr
 }
 
 /// Render a report's PR number for comparison.
-fn rendered(report: &PrLookupReport) -> Option<String> {
+pub(super) fn rendered(report: &PrLookupReport) -> Option<String> {
     report.pr_number.as_ref().map(ToString::to_string)
 }
 
@@ -359,39 +363,4 @@ fn a_skipped_write_records_its_reason() {
         nowhere,
         CacheWriteOutcome::Skipped(PersistSkipReason::CacheUnavailable)
     ));
-}
-
-#[rstest]
-fn a_status_line_survives_every_probe_failing(cache_root: io::Result<(TempDir, Utf8PathBuf)>) {
-    let (_guard, project_dir) = cache_root.expect("cache root");
-    let args = StatusArgs {
-        project_dir: Some(project_dir),
-        ..StatusArgs::default()
-    };
-    let clock = DefaultClock;
-    let github = StubGitHubClient::new(Reply::Found("42"));
-
-    let report = build_status_report(&args, &failing_runner(), &clock, &github)
-        .expect("a failing probe must not fail the command");
-
-    // The rendered contract: a project segment and nothing that needs git,
-    // tmux, or a PR lookup.
-    assert!(!report.line.is_empty());
-    assert!(!report.line.contains("\u{f418}"));
-    // Without a branch there is nothing to look up, so GitHub is untouched.
-    assert_eq!(github.calls.get(), 0);
-    assert!(report.diagnostics.pr.is_none());
-
-    let described = report.diagnostics.describe_failures();
-    assert!(described.iter().any(|line| line.contains("rev-parse")));
-    assert!(
-        described
-            .iter()
-            .any(|line| line.contains("display-message"))
-    );
-}
-
-#[rstest]
-fn diagnostics_are_empty_when_nothing_degrades() {
-    assert!(StatusDiagnostics::default().describe_failures().is_empty());
 }

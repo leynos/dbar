@@ -7,6 +7,57 @@ use super::*;
 use rstest::rstest;
 use std::time::Instant;
 
+use super::child::readers_joined;
+
+/// Wait for every process in `pgid`'s group to disappear, up to `deadline`.
+///
+/// A killed grandchild is reparented and reaped asynchronously, so a single
+/// probe would race that reap and flake. Polling to a deadline tolerates the
+/// delay while still failing a cleanup that never signalled the group at all.
+/// A pid that will not convert cannot be probed, which is reported as failure
+/// rather than as a group that vanished.
+fn group_exits_within(pgid: u32, deadline: Duration) -> bool {
+    let Ok(raw) = i32::try_from(pgid) else {
+        return false;
+    };
+    let Some(group) = rustix::process::Pid::from_raw(raw) else {
+        return false;
+    };
+    let started = Instant::now();
+    loop {
+        // `ESRCH` is the only answer that means the group is empty; `EPERM`
+        // would mean the pid now belongs to somebody else, so keep waiting.
+        if matches!(
+            rustix::process::test_kill_process_group(group),
+            Err(rustix::io::Errno::SRCH)
+        ) {
+            return true;
+        }
+        if started.elapsed() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Whether the direct child has been reaped, leaving no zombie behind.
+///
+/// `ECHILD` means this process has no such child left to wait for, which is
+/// exactly what a reap leaves behind; an unreaped child would still be
+/// waitable as a zombie.
+fn child_was_reaped(pid: u32) -> bool {
+    let Ok(raw) = i32::try_from(pid) else {
+        return false;
+    };
+    let Some(child) = rustix::process::Pid::from_raw(raw) else {
+        return false;
+    };
+    matches!(
+        rustix::process::waitpid(Some(child), rustix::process::WaitOptions::NOHANG),
+        Err(rustix::io::Errno::CHILD)
+    )
+}
+
 #[rstest]
 fn run_captures_stdout() {
     let runner = RealCommandRunner;
@@ -168,27 +219,54 @@ fn dropping_a_session_terminates_the_child_and_joins_its_readers() {
     // past the assertion window and backgrounds a grandchild holding the
     // inherited pipes, so a guard that skipped the group kill would block in the
     // reader join for the grandchild's whole lifetime, and a guard that returned
-    // before joining would be the leak this replaces. Returning promptly is
-    // therefore only possible if both halves ran.
-    //
-    // The assertion is on elapsed time rather than on the process group still
-    // existing, because the killed grandchild is reparented and reaped
-    // asynchronously: probing the group would race that reap and flake.
+    // before joining would be the leak this replaces.
     let mut command = Command::new("sh");
     command.args(["-c", "sleep 30 & sleep 30"]);
     capture_output(&mut command);
     use_own_process_group(&mut command);
-    let mut session = ChildSession::new(command.spawn().expect("sh spawns"));
+    let child = command.spawn().expect("sh spawns");
+    // The child leads its own group, so its pid doubles as the group id.
+    let pid = child.id();
+    let mut session = ChildSession::new(child);
     session.start_readers(1024).expect("both readers start");
 
+    let joined_before = readers_joined();
     let started = Instant::now();
     drop(session);
     let elapsed = started.elapsed();
 
+    assert_eq!(
+        readers_joined().saturating_sub(joined_before),
+        2,
+        "dropping the session must join both readers, not abandon them"
+    );
+    assert!(
+        child_was_reaped(pid),
+        "dropping the session must reap the direct child"
+    );
+    assert!(
+        group_exits_within(pid, Duration::from_secs(5)),
+        "dropping the session must terminate the whole process group"
+    );
     assert!(
         elapsed < Duration::from_secs(5),
         "dropping the session must not wait the child out, took {elapsed:?}"
     );
+}
+
+#[rstest]
+fn run_captures_output_under_a_maximal_limit() {
+    // A ceiling of `usize::MAX` leaves no room for the extra sentinel byte that
+    // detects an overrun. Wrapping the addition would read zero bytes and report
+    // empty output as a success; saturating reads the stream out in full.
+    let runner = RealCommandRunner;
+    let spec = CommandSpec::new("printf")
+        .args(["hello"])
+        .max_output_bytes(usize::MAX);
+    let output = runner
+        .run(&spec)
+        .expect("a maximal limit captures output whole");
+    assert_eq!(output.stdout, "hello");
 }
 
 #[rstest]
