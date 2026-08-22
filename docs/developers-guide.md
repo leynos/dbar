@@ -132,11 +132,14 @@ Each `(project directory, branch)` pair hashes to its own
 every branch a checkout has ever had, including branches long since deleted.
 `cache/mod.rs` reclaims them under this policy:
 
-- **Trigger.** Only a read that finds an entry past its TTL sweeps the
-  directory. That path is already committed to a fresh `gh` lookup, so the
-  common cache hit — the one taken on every tmux refresh — never lists the
-  directory at all. Writes never sweep, because `store_cached_value` is given
-  no TTL to judge entries by.
+- **Trigger.** A read never sweeps. `load_cached_value` reports an entry past
+  its TTL as `CacheLookup::Expired` and leaves it on disk;
+  `status::resolve_with_cache`, having just decided to go upstream anyway,
+  calls `cache::sweep_cache_dir` itself. The reclamation is therefore visible
+  at the call site rather than hidden behind a `load_*` name, while the trigger
+  is unchanged: the common cache hit — the one taken on every tmux refresh —
+  still never lists the directory. Writes never sweep either, because
+  `store_cached_value` is given no TTL to judge entries by.
 - **Bound.** One sweep lists at most 256 names, opens and parses at most 16
   of them, and removes at most 8 files. A backlog is therefore cleared across
   successive runs rather than in one unbounded pass on the hot path.
