@@ -5,8 +5,8 @@
 //! now rests here, at the call site that decided to go upstream.
 
 use super::tests::{
-    BRANCH, PROJECT_DIR, Reply, StubGitHubClient, args_with_cache, exists, lookup, rendered,
-    utf8_path, write_raw,
+    BRANCH, PROJECT_DIR, Reply, StubGitHubClient, args_with_cache, cache_root, exists, lookup,
+    rendered, write_raw,
 };
 use super::*;
 use camino::Utf8Path;
@@ -14,16 +14,6 @@ use mockable::DefaultClock;
 use rstest::rstest;
 use std::io;
 use tempfile::TempDir;
-
-/// A cache directory a test can seed entries into.
-///
-/// The [`TempDir`] guard is returned alongside its path because dropping it
-/// deletes the directory.
-fn seeded_cache_dir() -> io::Result<(TempDir, Utf8PathBuf)> {
-    let dir = TempDir::new()?;
-    let path = utf8_path(&dir)?;
-    Ok((dir, path))
-}
 
 /// A well-formed entry stamped at the epoch, and so expired against any TTL.
 fn expired_payload() -> String {
@@ -37,8 +27,8 @@ fn expired_payload() -> String {
 const STALE_SIBLING: &str = "pr_00000000000000ab.json";
 
 #[rstest]
-fn an_expired_read_makes_the_boundary_sweep() {
-    let (_guard, cache_dir) = seeded_cache_dir().expect("cache root");
+fn an_expired_read_makes_the_boundary_sweep(cache_root: io::Result<(TempDir, Utf8PathBuf)>) {
+    let (_guard, cache_dir) = cache_root.expect("cache root");
     let path = pr_cache_path(&cache_dir, Utf8Path::new(PROJECT_DIR), BRANCH);
     let sibling = cache_dir.join(STALE_SIBLING);
     write_raw(&path, &expired_payload()).expect("seed expired entry");
@@ -69,8 +59,8 @@ fn an_expired_read_makes_the_boundary_sweep() {
 }
 
 #[rstest]
-fn a_fresh_read_sweeps_nothing() {
-    let (_guard, cache_dir) = seeded_cache_dir().expect("cache root");
+fn a_fresh_read_sweeps_nothing(cache_root: io::Result<(TempDir, Utf8PathBuf)>) {
+    let (_guard, cache_dir) = cache_root.expect("cache root");
     let path = pr_cache_path(&cache_dir, Utf8Path::new(PROJECT_DIR), BRANCH);
     let sibling = cache_dir.join(STALE_SIBLING);
     let clock = DefaultClock;

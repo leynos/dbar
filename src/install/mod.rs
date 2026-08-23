@@ -29,8 +29,12 @@ pub enum RunMode {
 impl RunMode {
     /// Build the mode from a `--dry-run` flag.
     #[must_use]
-    pub const fn from_dry_run(dry_run: bool) -> Self {
-        if dry_run { Self::DryRun } else { Self::Write }
+    pub const fn from_dry_run(is_dry_run: bool) -> Self {
+        if is_dry_run {
+            Self::DryRun
+        } else {
+            Self::Write
+        }
     }
 
     /// Report whether this run only previews its result.
@@ -52,8 +56,8 @@ pub enum Width {
 impl Width {
     /// Build the width from a `--full` flag.
     #[must_use]
-    pub const fn from_full(full: bool) -> Self {
-        if full { Self::Full } else { Self::Plain }
+    pub const fn from_full(is_full: bool) -> Self {
+        if is_full { Self::Full } else { Self::Plain }
     }
 
     /// Report whether the full-width variant was requested.
@@ -71,9 +75,9 @@ pub struct InstallOutcome {
     /// Optional backup path when a file was overwritten.
     pub backup_path: Option<Utf8PathBuf>,
     /// Whether the file contents changed.
-    pub updated: bool,
+    pub is_updated: bool,
     /// Whether the install was a dry run.
-    pub dry_run: bool,
+    pub is_dry_run: bool,
     /// The snippet that would be or was written.
     pub snippet: String,
 }
@@ -114,7 +118,7 @@ pub enum InstallError {
 /// // Already resolved; `~` is not expanded by `install`.
 /// let path = dbar::config::default_tmux_config_path();
 /// let outcome = install(Some(path), StatusPosition::Right, RunMode::DryRun, Width::Plain)?;
-/// assert!(outcome.dry_run);
+/// assert!(outcome.is_dry_run);
 /// ```
 pub fn install(
     config_path_opt: Option<Utf8PathBuf>,
@@ -145,8 +149,8 @@ pub fn install(
         Err(err) => return Err(err),
     };
 
-    let (updated, contents) = apply_snippet(&existing, &snippet)?;
-    let backup_path = if should_back_up(updated, mode, &existing) {
+    let (is_updated, contents) = apply_snippet(&existing, &snippet)?;
+    let backup_path = if should_back_up(is_updated, mode, &existing) {
         let backup = backup_path_for(&config_path);
         // The backup holds the config's contents, so it must inherit the
         // config's mode rather than the backup path's own (absent) mode.
@@ -157,15 +161,15 @@ pub fn install(
         None
     };
 
-    if updated && !mode.is_dry_run() {
+    if is_updated && !mode.is_dry_run() {
         write(&config_path, &contents)?;
     }
 
     Ok(InstallOutcome {
         path: config_path,
         backup_path,
-        updated,
-        dry_run: mode.is_dry_run(),
+        is_updated,
+        is_dry_run: mode.is_dry_run(),
         snippet,
     })
 }
@@ -174,8 +178,8 @@ pub fn install(
 ///
 /// A backup is only written when the snippet actually changes the file, the
 /// run is not a dry run, and there is prior content worth preserving.
-const fn should_back_up(updated: bool, mode: RunMode, existing: &str) -> bool {
-    updated && !mode.is_dry_run() && !existing.is_empty()
+const fn should_back_up(is_updated: bool, mode: RunMode, existing: &str) -> bool {
+    is_updated && !mode.is_dry_run() && !existing.is_empty()
 }
 
 #[cfg(test)]

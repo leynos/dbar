@@ -267,7 +267,7 @@ proptest! {
         let after_second = read_back(&path);
 
         prop_assert_eq!(&after_first, &after_second, "second install rewrote the config");
-        prop_assert!(!second.updated, "second install reported an update");
+        prop_assert!(!second.is_updated, "second install reported an update");
         prop_assert!(
             second.backup_path.is_none(),
             "second install wrote a backup despite changing nothing"
@@ -310,7 +310,7 @@ proptest! {
             (next_position, next_full)
         );
         prop_assert_eq!(
-            second.updated,
+            second.is_updated,
             build_snippet(position, Width::from_full(full))
                 != build_snippet(next_position, Width::from_full(next_full)),
             "update flag did not track whether the snippet changed"

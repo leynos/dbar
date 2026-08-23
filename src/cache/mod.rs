@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::ambient_authority;
-use cap_std::fs_utf8::Dir;
+use cap_std::fs_utf8::{Dir, OpenOptions};
 use directories::ProjectDirs;
 use mockable::Clock;
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,17 @@ pub use retention::sweep_cache_dir;
 
 /// Disambiguates temp-file names for concurrent writers within one process.
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Temp names tried before a write gives up.
+///
+/// The temp file is created exclusively, so a name that is already taken is an
+/// error rather than a silent truncation. A stale temp file left behind by a
+/// crashed writer would otherwise wedge that cache key permanently, and the
+/// pid-and-counter pair — while improbable — is not a uniqueness proof either.
+/// Each attempt draws a fresh counter value, and [`sweep_cache_dir`] reclaims
+/// stale temp files in the background, so exhausting this budget means
+/// something is wrong with the directory rather than merely unlucky.
+const TEMP_NAME_ATTEMPTS: usize = 4;
 
 #[derive(Debug, Error)]
 /// Errors produced while reading or writing cached data.
@@ -233,17 +244,57 @@ fn write(path: &Utf8Path, payload: &str) -> Result<(), CacheError> {
     // Write to a uniquely named temp file in the same directory, then rename it
     // over the target. Rename is atomic on the same filesystem, so a concurrent
     // reader (or another writer) never observes a partially written entry.
+    let mut attempt = 1_usize;
+    loop {
+        let tmp_name = temp_name(file_name);
+        match create_and_fill(&dir, tmp_name.as_str(), payload) {
+            Ok(()) => return finish_write(&dir, tmp_name.as_str(), file_name),
+            // The name was taken. Nothing was opened, so nothing needs cleaning
+            // up; draw another name and try again.
+            Err(err)
+                if err.kind() == std::io::ErrorKind::AlreadyExists
+                    && attempt < TEMP_NAME_ATTEMPTS =>
+            {
+                attempt += 1;
+            }
+            Err(err) => return Err(CacheError::Io(err)),
+        }
+    }
+}
+
+/// Mint a temp name for `file_name`, unique across this process's writers.
+fn temp_name(file_name: &str) -> String {
     let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let tmp_name = format!("{file_name}.{}.{unique}.tmp", std::process::id());
-    let result = dir
-        .write(tmp_name.as_str(), payload.as_bytes())
-        .and_then(|()| dir.rename(tmp_name.as_str(), &dir, file_name));
+    format!("{file_name}.{}.{unique}.tmp", std::process::id())
+}
+
+/// Create `dir/tmp_name` exclusively and write `payload` into it.
+///
+/// `create_new` is what makes the temp file the writer's own: an existing name
+/// fails with `AlreadyExists` instead of being truncated, and a symlink
+/// planted at that name is refused rather than followed, so the payload can
+/// only ever land in a file this call has just created. `cap_std` already
+/// refuses to traverse a symlink out of the directory the [`Dir`] capability
+/// was opened on, so the redirection this closes is the one within that
+/// directory — but it also matches what `install::fs` does for the tmux
+/// config, and turns "silently overwrite whatever is there" into an error.
+fn create_and_fill(dir: &Dir, tmp_name: &str, payload: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    let mut file = dir.open_with(tmp_name, &options)?;
+    file.write_all(payload.as_bytes())
+}
+
+/// Rename the filled temp file over `file_name`, cleaning up on failure.
+fn finish_write(dir: &Dir, tmp_name: &str, file_name: &str) -> Result<(), CacheError> {
+    let result = dir.rename(tmp_name, dir, file_name);
     if result.is_err() {
         // Best-effort cleanup; surface the original error, not the removal's.
-        dir.remove_file(tmp_name.as_str()).ok();
+        dir.remove_file(tmp_name).ok();
     }
-    result?;
-    Ok(())
+    result.map_err(CacheError::Io)
 }
 
 fn open_parent(path: &Utf8Path) -> Result<(Dir, &str), CacheError> {

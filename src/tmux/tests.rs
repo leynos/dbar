@@ -6,6 +6,48 @@ use crate::command::{CommandError, CommandOutput, MockCommandRunner};
 use mockall::predicate::eq;
 use rstest::rstest;
 
+/// The `display-message` format for one field, written out by hand.
+///
+/// These literals are deliberately *not* derived from [`TmuxField::format`];
+/// they are the format strings tmux itself documents. Every mock expectation
+/// below is keyed on a specification built from this table, so a typo
+/// introduced into the production formats no longer moves both sides of the
+/// comparison at once: it stops matching the expectation and so fails the
+/// resolution tests too, not merely the literal check in
+/// `field_formats_match_their_hand_written_literals`.
+const fn expected_format(field: TmuxField) -> &'static str {
+    match field {
+        TmuxField::Session => "#{session_name}",
+        TmuxField::Window => "#{window_index}",
+        TmuxField::Pane => "#{pane_id}",
+        TmuxField::Socket => "#{socket_path}",
+    }
+}
+
+/// The `display-message` invocation a field must produce, built from the
+/// hand-written literal rather than from `field_spec`.
+fn expected_spec(field: TmuxField) -> CommandSpec {
+    CommandSpec::new("tmux").args(["display-message", "-p", expected_format(field)])
+}
+
+#[rstest]
+#[case::session(TmuxField::Session)]
+#[case::window(TmuxField::Window)]
+#[case::pane(TmuxField::Pane)]
+#[case::socket(TmuxField::Socket)]
+fn field_formats_match_their_hand_written_literals(#[case] field: TmuxField) {
+    // Pinned independently of the production table, so drifting from tmux's
+    // documented formats is a bug even when the rest of the crate agrees
+    // with the drift.
+    let format = expected_format(field);
+    assert_eq!(field.format(), format);
+    assert_eq!(field.to_string(), format);
+    assert_eq!(
+        field_spec(field.format()),
+        CommandSpec::new("tmux").args(["display-message", "-p", format])
+    );
+}
+
 /// The failure a query gets when tmux cannot answer it.
 fn query_failure() -> CommandError {
     CommandError::NonZero {
@@ -19,7 +61,9 @@ fn query_failure() -> CommandError {
 ///
 /// Each field gets its own `expect_run` keyed by an `eq` matcher on the exact
 /// specification, so a query for the wrong format string matches nothing and
-/// fails the test rather than being silently answered.
+/// fails the test rather than being silently answered. The specification comes
+/// from [`expected_spec`], which is built from hand-written literals, so these
+/// resolution tests fail on a production format typo instead of following it.
 struct Answers(Vec<(TmuxField, Option<String>)>);
 
 impl Answers {
@@ -49,7 +93,7 @@ impl Answers {
         for (field, answer) in self.0 {
             runner
                 .expect_run()
-                .with(eq(field_spec(field.format())))
+                .with(eq(expected_spec(field)))
                 .returning(move |_| {
                     answer.clone().map_or_else(
                         || Err(query_failure()),

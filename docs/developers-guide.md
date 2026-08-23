@@ -138,7 +138,7 @@ every branch a checkout has ever had, including branches long since deleted.
   calls `cache::sweep_cache_dir` itself. The reclamation is therefore visible
   at the call site rather than hidden behind a `load_*` name, while the trigger
   is unchanged: the common cache hit — the one taken on every tmux refresh —
-  still never lists the directory. Writes never sweep either, because
+  still never lists the directory. Writes never sweep either because
   `store_cached_value` is given no TTL to judge entries by.
 - **Bound.** One sweep lists at most 256 names, opens and parses at most 16
   of them, and removes at most 8 files. A backlog is therefore cleared across

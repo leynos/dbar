@@ -107,12 +107,12 @@ fn report_diagnostics_writes_only_when_enabled() {
 }
 
 /// An outcome with the given flags and a fixed path and snippet.
-fn outcome(dry_run: bool, updated: bool, backup: Option<&str>) -> install::InstallOutcome {
+fn outcome(is_dry_run: bool, is_updated: bool, backup: Option<&str>) -> install::InstallOutcome {
     install::InstallOutcome {
         path: camino::Utf8PathBuf::from("/tmp/tmux.conf"),
         backup_path: backup.map(camino::Utf8PathBuf::from),
-        updated,
-        dry_run,
+        is_updated,
+        is_dry_run,
         snippet: "# dbar: begin\n# dbar: end\n".to_owned(),
     }
 }

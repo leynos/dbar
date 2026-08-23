@@ -34,7 +34,7 @@ fn install_writes_snippet(workspace: Workspace) {
         Width::Plain,
     )
     .expect("install snippet");
-    assert!(outcome.updated);
+    assert!(outcome.is_updated);
     assert!(outcome.backup_path.is_some());
 
     let contents = read_to_string(&path).expect("read config");
@@ -59,7 +59,7 @@ fn install_is_idempotent(workspace: Workspace) {
         Width::Plain,
     )
     .expect("install snippet");
-    assert!(!second.updated);
+    assert!(!second.is_updated);
 }
 
 /// Each request must yield its own snippet variant.
@@ -115,7 +115,7 @@ fn install_dry_run_leaves_missing_parent_absent(workspace: Workspace) {
         Width::Plain,
     )
     .expect("dry run install");
-    assert!(outcome.dry_run);
+    assert!(outcome.is_dry_run);
     // The parent directory must not have been created by the dry run.
     assert!(Dir::open_ambient_dir(missing_parent.as_path(), ambient_authority()).is_err());
 }
@@ -139,7 +139,7 @@ fn install_preserves_restrictive_permissions(workspace: Workspace) {
         Width::Plain,
     )
     .expect("install snippet");
-    assert!(outcome.updated);
+    assert!(outcome.is_updated);
 
     let mode = dir
         .metadata(file_name)
@@ -249,7 +249,7 @@ fn concurrent_installs_leave_one_well_formed_block(workspace: Workspace) {
     let repeat =
         install(Some(path), winner, RunMode::Write, Width::Plain).expect("re-install the winner");
     assert!(
-        !repeat.updated,
+        !repeat.is_updated,
         "the winning snippet must already be installed verbatim: {contents}"
     );
 }

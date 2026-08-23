@@ -418,9 +418,6 @@ Revised 2026-01-05 to mark the plan complete with final outcomes.
 
 Revised 2026-01-05 to document the pane current path update.
 
-Revised 2026-08-22 to add `mockall` and `proptest` to the delivered
-dev-dependency list, which had omitted them.
-
 Revised 2026-08-01 to correct "Interfaces and dependencies" so it lists the
 delivered `CommandRunner`/`GitHubClient` interfaces, free-function probing
 API, and full runtime dependency list, replacing speculative interface
@@ -433,3 +430,6 @@ Revised 2026-08-14 to correct `config::load_command`'s error type from
 module-path prefix from "Interfaces and dependencies" since every module
 in `src/lib.rs` is declared with a private `mod`; the only public crate
 surface is `dbar::run()` and the re-exported `dbar::DbarError`.
+
+Revised 2026-08-22 to add `mockall` and `proptest` to the delivered
+dev-dependency list, which had omitted them.

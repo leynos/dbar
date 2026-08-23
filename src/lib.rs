@@ -182,10 +182,10 @@ fn report_install_outcome(
     writer: &mut impl Write,
     outcome: &install::InstallOutcome,
 ) -> io::Result<()> {
-    if outcome.dry_run {
+    if outcome.is_dry_run {
         write_line(writer, &format!("Dry run for {}:", outcome.path))?;
         write_line(writer, &outcome.snippet)?;
-    } else if outcome.updated {
+    } else if outcome.is_updated {
         write_line(writer, &format!("Updated tmux config at {}", outcome.path))?;
         if let Some(backup) = outcome.backup_path.as_ref() {
             write_line(writer, &format!("Backup written to {backup}"))?;
