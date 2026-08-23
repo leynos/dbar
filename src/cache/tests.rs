@@ -4,7 +4,7 @@
 use super::retention::{SWEEP_INSPECT_LIMIT, SWEEP_REMOVAL_LIMIT};
 use super::*;
 use camino::Utf8PathBuf;
-use mockable::DefaultClock;
+use mockable::{DefaultClock, MockClock};
 use rstest::{fixture, rstest};
 use tempfile::TempDir;
 
@@ -143,6 +143,38 @@ fn entry_names(dir: &Utf8Path) -> Result<Vec<String>, CacheError> {
 /// The TTL the sweep tests read and sweep against.
 const SWEEP_TTL: CacheTtlSeconds = CacheTtlSeconds::new(1);
 
+/// Names a sweep must leave alone however stale they are.
+///
+/// Each is seeded holding an expired payload, so only the ownership predicate
+/// stands between it and removal. The second group probes the temp-file
+/// predicate specifically: each one is a near miss for the
+/// `pr_<16 hex>.json.<pid>.<counter>.tmp` shape the writer mints.
+const DECOYS: [&str; 12] = [
+    "pr_notahexdigits0.json",   // right length, not hex
+    "pr_0123456789ABCDEF.json", // uppercase hex
+    "pr_deadbeef.json",         // too few digits
+    "pr_0123456789abcdef.json.tmp",
+    "pr_0123456789abcdef.jsonx",
+    "0123456789abcdef.json", // missing prefix
+    "README.md",
+    "pr_0123456789abcdef.json.4321.tmp",    // one field short
+    "pr_0123456789abcdef.json.abc.7.tmp",   // non-decimal pid
+    "pr_0123456789abcdef.json.4321.7.tmpx", // wrong extension
+    "pr_0123456789ABCDEF.json.4321.7.tmp",  // uppercase digest
+    "cache.json.4321.7.tmp",                // a temp file for a name dbar never mints
+];
+
+/// A clock reading far past anything this suite writes, so every seeded file
+/// is unambiguously stale by its own mtime.
+const DISTANT_FUTURE: &str = "2200-01-01T00:00:00+00:00";
+
+/// A temp file name of the shape [`temp_name`] mints.
+const ORPHAN_NAME: &str = "pr_00000000000000ab.json.4321.7.tmp";
+
+/// A payload a killed writer could plausibly have left behind: the raw entry
+/// bytes, truncated mid-write, with no timestamp to judge the file by.
+const PARTIAL_PAYLOAD: &str = "{\"value\":\"1\",\"upd";
+
 /// Seed an expired target entry, read it, then sweep the directory explicitly.
 ///
 /// This mirrors the shape of the production call site in `status`: the read
@@ -217,18 +249,7 @@ fn sweep_keeps_unexpired_owned_entries(workspace: Workspace) {
 #[rstest]
 fn sweep_leaves_unrelated_files_untouched(workspace: Workspace) {
     let (_temp_dir, dir) = workspace.expect("workspace");
-    // Every decoy holds an expired payload, so only the ownership predicate
-    // stands between it and removal.
-    let decoys = [
-        "pr_notahexdigits0.json",   // right length, not hex
-        "pr_0123456789ABCDEF.json", // uppercase hex
-        "pr_deadbeef.json",         // too few digits
-        "pr_0123456789abcdef.json.tmp",
-        "pr_0123456789abcdef.jsonx",
-        "0123456789abcdef.json", // missing prefix
-        "README.md",
-    ];
-    for name in decoys {
+    for name in DECOYS {
         seed_entry(&dir, name, 0).expect("seed decoy");
     }
     // A directory named exactly like an owned entry must survive too.
@@ -236,7 +257,7 @@ fn sweep_leaves_unrelated_files_untouched(workspace: Workspace) {
     Dir::create_ambient_dir_all(&nested, ambient_authority()).expect("create subdirectory");
     read_then_sweep(&dir).expect("expired read and sweep");
 
-    let mut expected: Vec<String> = decoys.iter().map(|name| (*name).to_owned()).collect();
+    let mut expected: Vec<String> = DECOYS.iter().map(|name| (*name).to_owned()).collect();
     expected.push("pr_00000000000000cd.json".to_owned());
     expected.sort();
     assert_eq!(entry_names(&dir).expect("list directory"), expected);
@@ -295,5 +316,45 @@ fn sweep_removes_no_more_than_the_per_run_bound(workspace: Workspace) {
     assert_eq!(
         entry_names(&dir).expect("list directory").len(),
         seeded - SWEEP_REMOVAL_LIMIT
+    );
+}
+
+#[rstest]
+fn sweep_reclaims_a_stale_orphaned_temp_file(workspace: Workspace) {
+    let (_temp_dir, dir) = workspace.expect("workspace");
+    seed_raw(&dir, ORPHAN_NAME, PARTIAL_PAYLOAD).expect("seed orphaned temp file");
+    for name in DECOYS {
+        seed_entry(&dir, name, 0).expect("seed decoy");
+    }
+
+    // The orphan carries no parseable timestamp, so the sweep judges it by its
+    // mtime. Reading the clock from the far future is what makes the file old
+    // without having to backdate it.
+    let mut clock = MockClock::new();
+    let future = DISTANT_FUTURE.parse().expect("the distant future parses");
+    clock.expect_utc().returning(move || future);
+    sweep_cache_dir(&dir, &clock, SWEEP_TTL).expect("sweep");
+
+    let mut expected: Vec<String> = DECOYS.iter().map(|name| (*name).to_owned()).collect();
+    expected.sort();
+    assert_eq!(
+        entry_names(&dir).expect("list directory"),
+        expected,
+        "the sweep must reclaim the orphaned temp file and nothing else"
+    );
+}
+
+#[rstest]
+fn sweep_keeps_an_in_flight_temp_file(workspace: Workspace) {
+    let (_temp_dir, dir) = workspace.expect("workspace");
+    seed_raw(&dir, ORPHAN_NAME, PARTIAL_PAYLOAD).expect("seed in-flight temp file");
+    // The real clock is the point: a temp file belonging to a writer that is
+    // still running was created moments ago, and removing it would corrupt
+    // that write. Age is the only discriminator, so it must hold here.
+    read_then_sweep(&dir).expect("expired read and sweep");
+    assert_eq!(
+        entry_names(&dir).expect("list directory"),
+        vec![ORPHAN_NAME],
+        "a temp file younger than the TTL may belong to a live writer"
     );
 }

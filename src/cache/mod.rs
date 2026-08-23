@@ -318,3 +318,5 @@ const fn to_epoch_seconds(timestamp: i64) -> Result<u64, CacheError> {
 mod concurrency_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod write_tests;

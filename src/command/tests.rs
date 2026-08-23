@@ -7,7 +7,7 @@ use super::*;
 use rstest::rstest;
 use std::time::Instant;
 
-use super::child::readers_joined;
+use super::child::{ReadOutcome, readers_joined};
 
 /// Wait for every process in `pgid`'s group to disappear, up to `deadline`.
 ///
@@ -278,4 +278,40 @@ fn run_accepts_output_exactly_at_the_limit() {
         .max_output_bytes(5);
     let output = runner.run(&spec).expect("output at the limit is captured");
     assert_eq!(output.stdout, "hello");
+}
+
+#[rstest]
+fn a_reader_does_not_signal_the_group_after_the_child_is_reaped() {
+    // The overrun kill and the session's own kill are separate signalling
+    // paths, and a reader has no way of its own to know the child has already
+    // been reaped. Ordering the two by hand makes the hazard deterministic
+    // rather than waiting on a race: 2000 bytes fits inside the 64 KiB pipe
+    // buffer, so the child writes the lot and exits without blocking, the data
+    // outlives it in the pipe, and reaping before the readers start guarantees
+    // the overrun is detected strictly after the reap. Without the shared
+    // claim the reader kills a pid the kernel has already taken back.
+    let mut command = Command::new("sh");
+    command.args(["-c", "head -c 2000 /dev/zero | tr '\\0' 'x'"]);
+    capture_output(&mut command);
+    use_own_process_group(&mut command);
+    let child = command.spawn().expect("sh spawns");
+    let mut session = ChildSession::new(child);
+
+    let status = session
+        .wait_for(Duration::from_secs(20))
+        .expect("the wait succeeds");
+    assert!(status.is_some(), "the child must exit within the wait");
+
+    session.start_readers(1024).expect("both readers start");
+    let (stdout, _stderr) = session.join_readers().expect("both readers join");
+
+    assert!(
+        matches!(stdout, ReadOutcome::TooLarge),
+        "the buffered output must still be seen to overrun its ceiling"
+    );
+    assert_eq!(
+        session.post_reap_reader_signals(),
+        0,
+        "a reader must not kill a process group whose pid has been given back"
+    );
 }

@@ -7,12 +7,14 @@
 
 use std::io::{self, Read};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use wait_timeout::ChildExt as _;
 
 use super::CommandError;
+use super::signal::{SignalClaim, Signaller};
 
 /// Configure a command to capture both streams with no stdin of its own.
 pub(super) fn capture_output(command: &mut Command) {
@@ -43,10 +45,13 @@ pub(super) enum ReadOutcome {
 /// that extra byte materializes the buffer is dropped and the child's process
 /// group is killed, because there is no point letting a runaway producer keep
 /// writing into a capture that has already been abandoned.
+///
+/// That kill goes through the shared claim, so it cannot double up with the
+/// session's own and cannot land once the session has reaped the child.
 fn spawn_reader(
     mut pipe: impl Read + Send + 'static,
     limit: usize,
-    pid: u32,
+    claim: Arc<SignalClaim>,
 ) -> JoinHandle<io::Result<ReadOutcome>> {
     std::thread::spawn(move || {
         let ceiling = u64::try_from(limit)
@@ -65,7 +70,7 @@ fn spawn_reader(
             drop(buffer);
             // Best effort: the caller's cleanup paths are the backstop, so a
             // failure here is not worth reporting over the size violation.
-            drop(signal_process_group(pid));
+            drop(claim.signal(Signaller::Reader));
             return Ok(ReadOutcome::TooLarge);
         }
         Ok(ReadOutcome::Bytes(buffer))
@@ -121,27 +126,6 @@ pub(super) fn use_own_process_group(command: &mut Command) {
     command.process_group(0);
 }
 
-/// Terminate the child and every descendant sharing its process group.
-///
-/// Signalling only the direct child would leave a backgrounded grandchild
-/// holding the inherited pipe write end open, so the reader threads would never
-/// observe EOF and the timeout would block instead of returning.
-///
-/// The pid is taken raw rather than as a `&Child` so that a reader thread,
-/// which does not own the child handle, can terminate the group too.
-fn signal_process_group(child_pid: u32) -> Result<(), CommandError> {
-    let raw = i32::try_from(child_pid)
-        .map_err(|_| io::Error::other("child pid does not fit in a process id"))?;
-    let pid = rustix::process::Pid::from_raw(raw)
-        .ok_or_else(|| io::Error::other("child pid is not a valid process id"))?;
-    match rustix::process::kill_process_group(pid, rustix::process::Signal::KILL) {
-        // An empty group means every descendant has already exited, which is
-        // exactly the state the caller wants; treat it as success.
-        Ok(()) | Err(rustix::io::Errno::SRCH) => Ok(()),
-        Err(err) => Err(CommandError::Io(io::Error::from(err))),
-    }
-}
-
 /// Join a reader that should have been started, reporting its absence rather
 /// than panicking on the `None` that cannot occur.
 fn join_started_reader(
@@ -171,13 +155,9 @@ fn join_started_reader(
 pub(super) struct ChildSession {
     /// The direct child, retained so it can be reaped.
     child: Child,
-    /// Cached at spawn because `Child::id` is meaningless once the child is
-    /// reaped, and the group kill needs the pid afterwards.
-    pid: u32,
-    /// Whether the process group has already been signalled successfully, so
-    /// that `Drop` does not signal a second time. Once the child is reaped its
-    /// pid may be recycled, and a redundant kill would then land on a stranger.
-    signalled: bool,
+    /// The right to kill the child's process group, shared with both reader
+    /// threads so that only one of the three ever spends it.
+    claim: Arc<SignalClaim>,
     /// Whether the direct child has been reaped, by `wait_timeout` or by
     /// [`Self::reap`].
     reaped: bool,
@@ -190,11 +170,10 @@ pub(super) struct ChildSession {
 impl ChildSession {
     /// Take ownership of a freshly spawned child.
     pub(super) fn new(child: Child) -> Self {
-        let pid = child.id();
+        let claim = Arc::new(SignalClaim::new(child.id()));
         Self {
             child,
-            pid,
-            signalled: false,
+            claim,
             reaped: false,
             stdout_reader: None,
             stderr_reader: None,
@@ -208,36 +187,42 @@ impl ChildSession {
     /// and being misreported as a timeout.
     pub(super) fn start_readers(&mut self, limit: usize) -> Result<(), CommandError> {
         let stdout = take_pipe(self.child.stdout.take())?;
-        self.stdout_reader = Some(spawn_reader(stdout, limit, self.pid));
+        self.stdout_reader = Some(spawn_reader(stdout, limit, Arc::clone(&self.claim)));
         let stderr = take_pipe(self.child.stderr.take())?;
-        self.stderr_reader = Some(spawn_reader(stderr, limit, self.pid));
+        self.stderr_reader = Some(spawn_reader(stderr, limit, Arc::clone(&self.claim)));
         Ok(())
     }
 
     /// Wait up to `timeout` for the child, recording the reap if it exited.
+    ///
+    /// The reap is recorded against the shared claim as soon as `wait_timeout`
+    /// reports it, which is what stops a reader signalling a pid this process
+    /// no longer owns.
     pub(super) fn wait_for(
         &mut self,
         timeout: Duration,
     ) -> Result<Option<ExitStatus>, CommandError> {
         let status = self.child.wait_timeout(timeout)?;
         if status.is_some() {
-            self.reaped = true;
+            self.mark_reaped();
         }
         Ok(status)
     }
 
+    /// Note the reap locally and against the shared claim.
+    fn mark_reaped(&mut self) {
+        self.reaped = true;
+        self.claim.mark_reaped();
+    }
+
     /// Terminate the child and every descendant sharing its process group.
     ///
-    /// Idempotent: repeated calls after a successful signal do nothing, so the
-    /// explicit call on a failure path and the one in `Drop` cannot combine
-    /// into a second kill aimed at a recycled pid.
+    /// Idempotent, and mutually exclusive with the readers' kill: whichever of
+    /// the three spends the claim first is the only one to signal, so the
+    /// explicit call on a failure path, the one in `Drop`, and an overrunning
+    /// reader cannot combine into a second kill aimed at a recycled pid.
     pub(super) fn release_process_group(&mut self) -> Result<(), CommandError> {
-        if self.signalled {
-            return Ok(());
-        }
-        signal_process_group(self.pid)?;
-        self.signalled = true;
-        Ok(())
+        self.claim.signal(Signaller::Session)
     }
 
     /// Reap the direct child, at most once.
@@ -245,9 +230,18 @@ impl ChildSession {
         if self.reaped {
             return Ok(());
         }
-        self.reaped = true;
-        self.child.wait()?;
+        // Recorded before the wait is checked: a wait that failed still leaves
+        // a pid nobody here should be signalling.
+        let waited = self.child.wait();
+        self.mark_reaped();
+        waited?;
         Ok(())
+    }
+
+    /// Kills a reader issued after the reap was recorded.
+    #[cfg(test)]
+    pub(super) fn post_reap_reader_signals(&self) -> usize {
+        self.claim.post_reap_reader_signals()
     }
 
     /// Join both readers, collecting the second before reporting the first's

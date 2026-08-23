@@ -36,6 +36,7 @@ use camino::Utf8PathBuf;
 use thiserror::Error;
 
 mod child;
+mod signal;
 
 use child::{ChildSession, capture_output, require_within_limit, use_own_process_group};
 
