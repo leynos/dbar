@@ -433,3 +433,11 @@ surface is `dbar::run()` and the re-exported `dbar::DbarError`.
 
 Revised 2026-08-22 to add `mockall` and `proptest` to the delivered
 dev-dependency list, which had omitted them.
+
+Revised 2026-08-31 to record the final process-group coordination design:
+`SignalClaim` owns the shared, mutex-protected signal state between the
+bounded readers and `ChildSession`; readers cannot signal after a reap, while
+the session may spend one post-reap signal to evict descendants that still
+hold captured pipes open. The implementation and developer documentation now
+record the `Unsignalled`, `Signalled`, `Reaped`, and `Sealed` transitions and
+the rule that a failed signal restores the previous state.

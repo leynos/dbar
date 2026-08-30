@@ -117,13 +117,14 @@ from `run()` based on the parsed `DbarCommand`.
 4. `tmux::resolve_context` fills in any tmux fields not already supplied on
    the command line by querying `tmux display-message`.
 5. `render::render_status_line` combines the project, git, PR, tmux, and
-   clock segments into the final tmux-ready string, which `run_status` prints
-   to stdout, together with a `StatusDiagnostics` describing every probe
-   failure the fallback policy absorbed along the way.
-6. If the `DBAR_DIAGNOSTICS` environment variable is set, `run_status` mirrors
-   those diagnostics to stderr, one failure per line; stdout is unaffected
-   either way, so the tmux status line contract is unchanged. See
-   `report_diagnostics` in `src/lib.rs`.
+   clock segments into the final tmux-ready string. `build_status_report`
+   returns that string as `StatusReport::line` and keeps the absorbed failures
+   separately in `StatusReport::diagnostics` (`StatusDiagnostics`).
+6. `run_status` writes only `StatusReport::line` to stdout. If the
+   `DBAR_DIAGNOSTICS` environment variable is set, it mirrors the diagnostics
+   to stderr, one failure per line; diagnostics are never mixed into stdout,
+   so the tmux status-line contract is unchanged. See `report_diagnostics` in
+   `src/lib.rs`.
 
 ### Cache retention
 
@@ -344,3 +345,22 @@ never observe EOF even after the direct child is killed. On timeout, the
 whole process group is signalled, the reader threads are joined to avoid
 leaking them, and `CommandError::Timeout` is returned as the reported
 failure.
+
+### Process-group signal ownership
+
+`command::SignalClaim` coordinates the two bounded reader threads with the
+owning `ChildSession`. Each participant shares one mutex-protected claim and
+the child process ID captured at spawn time. The mutex is held through the
+decision and the process-group `kill` syscall: recording a reap cannot race a
+signal that has already been authorised but not yet delivered.
+
+The claim has four states: `Unsignalled`, `Signalled`, `Reaped`, and `Sealed`.
+Either a reader (`Signaller::Reader`) or the session
+(`Signaller::Session`) may spend an `Unsignalled` claim, moving it to
+`Signalled`. When the direct child is reaped, the claim moves to `Reaped` if
+no signal was sent, or to `Sealed` if the group was already signalled. A
+session may spend a `Reaped` claim once, moving it to `Sealed`, to evict a
+descendant that still holds a captured pipe open. Readers cannot signal from
+`Reaped` or `Sealed`; this post-reap rule prevents a reader from aiming a
+recycled process ID. A failed signal restores the previous state so session
+cleanup can retry.

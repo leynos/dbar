@@ -6,6 +6,8 @@ dbar renders a tmux-friendly status segment that shows the current project
 name, git branch and status, upstream divergence, pull request number, worktree
 indicator, tmux session details, and an optional clock. It outputs tmux
 `#[...]` style tags so it can be embedded directly in the tmux status line.
+For the change from the pre-0.2 usage to this CLI, see the [0.2 migration
+guide](migration-0.2.md).
 
 ## Quick start
 
@@ -53,6 +55,13 @@ Use `--dry-run` to preview the snippet without writing to disk:
 ```sh
 cargo run -- install --path ~/.tmux.conf --dry-run
 ```
+
+An install reports whether it updated the file or found it already up to date.
+When an existing file is changed, dbar writes a sibling backup before the
+replacement. A dry run reports the generated snippet and does not create the
+configuration file, its parent directory, a lock, or a backup. Existing dbar
+markers are updated in place; incomplete or duplicate marker blocks are
+reported as errors so unrelated configuration is not rewritten accidentally.
 
 ### Manual snippet
 
@@ -148,8 +157,31 @@ status line is identical whether or not the variable is set, so it is safe
 to enable inside a tmux status command without affecting the segment tmux
 displays.
 
+## Status outcomes and defaults
+
+`status` defaults to the current working directory, attempts to show the pull
+request number, leaves the clock disabled, and uses `%H:%M` when the clock is
+enabled. Supplying `--project-dir` points the git probes at another directory;
+tmux session, window, pane, and socket values can be supplied explicitly or
+resolved from the current tmux server.
+
+Missing or failed git, GitHub, and tmux probes are fallbacks rather than fatal
+status errors: dbar omits or simplifies the affected segment and still emits a
+status line. An invalid clock format or invalid configuration value is a
+configuration error and stops the command instead of silently choosing a
+different value. Standard output remains reserved for the tmux status line;
+diagnostic details are opt-in on standard error as described above.
+
 ## Caching
 
 dbar caches GitHub PR lookups under the XDG cache directory using the
 `directories` crate. Override the cache directory with `--cache-dir` if needed,
-and adjust the TTL with `--pr-cache-ttl-seconds`.
+and adjust the TTL with `--pr-cache-ttl-seconds`. The default TTL is 60 seconds.
+
+A fresh cache entry is used without invoking GitHub. A missing, expired,
+unreadable, or malformed entry triggers a fresh lookup. A successful GitHub
+number, an explicit no-PR result, or a `pr/<number>`/`pr-<number>` style branch
+fallback is cached; a failed GitHub lookup is not cached, so a transient
+failure does not persist for the whole TTL. If the cache directory cannot be
+resolved or written, dbar still renders the value from the live lookup or
+branch fallback and reports the degradation only when diagnostics are enabled.
