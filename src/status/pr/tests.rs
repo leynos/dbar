@@ -2,12 +2,11 @@
 //! and the decision (including persistence) for every lookup outcome.
 
 use super::*;
-use crate::github::CommandFailure;
 use rstest::rstest;
 
 /// A stand-in for a failed `gh` invocation.
-fn lookup_failure() -> GitHubError {
-    GitHubError::Command(CommandFailure::ExitStatus(1))
+const fn lookup_failure() -> GitHubLookupFailure {
+    GitHubLookupFailure::Unavailable
 }
 
 /// Render a decision's PR number for comparison.
@@ -107,9 +106,9 @@ fn a_healthy_report_describes_no_failures() {
 fn a_degraded_report_describes_every_failure() {
     let report = PrLookupReport {
         pr_number: None,
-        cache: CacheOutcome::ReadFailed(CacheError::MissingFileName),
+        cache: CacheOutcome::ReadFailed(CacheFailure::Read),
         resolution: PrResolution::LookupFailed(lookup_failure()),
-        write: CacheWriteOutcome::Failed(CacheError::MissingBaseDir),
+        write: CacheWriteOutcome::Failed(CacheFailure::Write),
     };
     let described = report.describe_failures();
     assert_eq!(described.len(), 3);
@@ -122,6 +121,7 @@ fn a_degraded_report_describes_every_failure() {
 #[case::served_from_cache(PersistSkipReason::ServedFromCache, "served from the cache")]
 #[case::lookup_failed(PersistSkipReason::LookupFailed, "the lookup failed")]
 #[case::cache_unavailable(PersistSkipReason::CacheUnavailable, "the cache is unavailable")]
+#[case::status_read_only(PersistSkipReason::StatusReadOnly, "status reads the cache only")]
 fn a_skipped_write_describes_its_reason(#[case] reason: PersistSkipReason, #[case] expected: &str) {
     let outcome = CacheWriteOutcome::Skipped(reason);
     assert_eq!(outcome.to_string(), format!("not written ({expected})"));
@@ -130,6 +130,6 @@ fn a_skipped_write_describes_its_reason(#[case] reason: PersistSkipReason, #[cas
 #[rstest]
 fn a_completed_write_describes_itself() {
     assert_eq!(CacheWriteOutcome::Stored.to_string(), "written");
-    let failed = CacheWriteOutcome::Failed(CacheError::MissingBaseDir);
-    assert!(failed.to_string().starts_with("write failed:"));
+    let failed = CacheWriteOutcome::Failed(CacheFailure::Write);
+    assert_eq!(failed.to_string(), "write failed");
 }

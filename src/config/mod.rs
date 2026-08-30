@@ -55,6 +55,8 @@ pub struct Cli {
 pub enum Commands {
     /// Render a status line segment.
     Status(StatusArgs),
+    /// Refresh the cached pull-request value for a project branch.
+    Refresh(RefreshArgs),
     /// Install the tmux configuration snippet.
     Install(InstallArgs),
 }
@@ -108,6 +110,9 @@ pub struct StatusArgs {
     /// Override the cache directory used for PR lookups.
     #[arg(long)]
     pub cache_dir: Option<Utf8PathBuf>,
+    /// Emit structured, redacted diagnostics to stderr.
+    #[arg(long, num_args = 0, default_missing_value = "true")]
+    pub diagnostics: Option<bool>,
 }
 
 impl StatusArgs {
@@ -132,6 +137,37 @@ impl StatusArgs {
     /// let ttl = StatusArgs::default().pr_cache_ttl_or_default();
     /// assert_eq!(ttl, CacheTtlSeconds::default());
     /// ```
+    #[must_use]
+    pub fn pr_cache_ttl_or_default(&self) -> CacheTtlSeconds {
+        self.pr_cache_ttl_seconds.unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, OrthoConfig, Default, Parser)]
+#[ortho_config(prefix = "DBAR")]
+#[command(name = "refresh")]
+/// Arguments for refreshing a cached pull-request value.
+pub struct RefreshArgs {
+    /// Override the project directory used for the GitHub lookup.
+    #[arg(long)]
+    pub project_dir: Option<Utf8PathBuf>,
+    /// Mock PR number for GitHub lookups (used in tests).
+    #[arg(long, hide = true)]
+    pub github_mock_pr: Option<String>,
+    /// Cache TTL for PR lookups, in seconds.
+    #[arg(long)]
+    pub pr_cache_ttl_seconds: Option<CacheTtlSeconds>,
+    /// Override the cache directory used for PR lookups.
+    #[arg(long)]
+    pub cache_dir: Option<Utf8PathBuf>,
+    /// Emit structured, redacted diagnostics to stderr.
+    #[arg(long, num_args = 0, default_missing_value = "true")]
+    pub diagnostics: Option<bool>,
+}
+
+impl RefreshArgs {
+    /// The PR cache TTL, or [`CacheTtlSeconds::default`] if no layer supplied
+    /// one.
     #[must_use]
     pub fn pr_cache_ttl_or_default(&self) -> CacheTtlSeconds {
         self.pr_cache_ttl_seconds.unwrap_or_default()
@@ -213,6 +249,8 @@ pub(crate) const DEFAULT_CLOCK_FORMAT: &str = "%H:%M";
 pub enum DbarCommand {
     /// Render a status line.
     Status(StatusArgs),
+    /// Refresh a cached PR value.
+    Refresh(RefreshArgs),
     /// Install the tmux snippet.
     Install(InstallArgs),
 }
@@ -256,6 +294,7 @@ where
 fn merge_command(cli: Cli) -> Result<DbarCommand, ConfigError> {
     match cli.command {
         Commands::Status(args) => Ok(DbarCommand::Status(args.load_and_merge()?)),
+        Commands::Refresh(args) => Ok(DbarCommand::Refresh(args.load_and_merge()?)),
         Commands::Install(args) => Ok(DbarCommand::Install(args.load_and_merge()?)),
     }
 }

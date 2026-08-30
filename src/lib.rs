@@ -30,11 +30,12 @@ mod types;
 
 pub use crate::error::DbarError;
 
-use std::io::{self, Write};
+use std::io::{self, ErrorKind, Write};
 
 use crate::command::RealCommandRunner;
 use crate::config::DbarCommand;
 use crate::github::{GhCliClient, GitHubClient, MockGitHubClient};
+use camino::{Utf8Path, Utf8PathBuf};
 use mockable::{DefaultClock, DefaultEnv, Env};
 
 /// Run the dbar CLI and print the requested output.
@@ -58,6 +59,7 @@ pub fn run() -> Result<(), DbarError> {
     let diagnostics_enabled = diagnostics_enabled(&DefaultEnv::new());
     match config::load_command()? {
         DbarCommand::Status(args) => run_status(&args, diagnostics_enabled),
+        DbarCommand::Refresh(args) => run_refresh(&args, diagnostics_enabled),
         DbarCommand::Install(args) => run_install(args),
     }
 }
@@ -109,18 +111,64 @@ fn flush_writer(writer: &mut impl Write) -> io::Result<()> {
 fn run_status(args: &config::StatusArgs, diagnostics_enabled: bool) -> Result<(), DbarError> {
     let runner = RealCommandRunner;
     let clock = DefaultClock;
+    let project_dir = resolve_project_dir(args.project_dir.as_deref())?;
+    let report = status::build_status_report(args, &project_dir, &runner, &clock)?;
+    let mut stdout = io::stdout();
+    write_line(&mut stdout, &report.line)?;
+    flush_writer(&mut stdout)?;
+    report_diagnostics(
+        &mut io::stderr(),
+        &report.diagnostics,
+        diagnostics_enabled || args.diagnostics == Some(true),
+    )?;
+    Ok(())
+}
+
+/// Refresh the PR cache explicitly, leaving `status` as a read-only query.
+fn run_refresh(args: &config::RefreshArgs, diagnostics_enabled: bool) -> Result<(), DbarError> {
+    let runner = RealCommandRunner;
+    let clock = DefaultClock;
+    let project_dir = resolve_project_dir(args.project_dir.as_deref())?;
+    let git = git::git_status(&runner, &project_dir);
+    let Some(branch) = git.status().and_then(|status| status.branch.as_ref()) else {
+        return Ok(());
+    };
     let mock_client = args.github_mock_pr.as_deref().map(MockGitHubClient::new);
     let gh_client = GhCliClient::new(&runner);
     let github: &dyn GitHubClient = match mock_client.as_ref() {
         Some(client) => client,
         None => &gh_client,
     };
-    let report = status::build_status_report(args, &runner, &clock, github)?;
-    let mut stdout = io::stdout();
-    write_line(&mut stdout, &report.line)?;
-    flush_writer(&mut stdout)?;
-    report_diagnostics(&mut io::stderr(), &report.diagnostics, diagnostics_enabled)?;
+    let request = status::RefreshRequest {
+        args,
+        project_dir: &project_dir,
+        branch: branch.as_ref(),
+        clock: &clock,
+        github,
+    };
+    let report = status::refresh_pr_cache(&request);
+    let diagnostics = status::StatusDiagnostics {
+        git: git.into_failures(),
+        tmux: Vec::new(),
+        pr: Some(report),
+    };
+    report_diagnostics(
+        &mut io::stderr(),
+        &diagnostics,
+        diagnostics_enabled || args.diagnostics == Some(true),
+    )?;
     Ok(())
+}
+
+/// Resolve the project directory at the CLI boundary, before query handling.
+fn resolve_project_dir(project_dir: Option<&Utf8Path>) -> Result<Utf8PathBuf, DbarError> {
+    if let Some(path) = project_dir {
+        return Ok(path.to_path_buf());
+    }
+    let current = std::env::current_dir()?;
+    Utf8PathBuf::from_path_buf(current).map_err(|_| {
+        io::Error::new(ErrorKind::InvalidData, "current directory is not UTF-8").into()
+    })
 }
 
 /// The lines to mirror to stderr, which is none unless diagnostics are enabled.

@@ -123,6 +123,21 @@ fn seed_raw(dir: &Utf8Path, name: &str, payload: &str) -> Result<Utf8PathBuf, Ca
     Ok(path)
 }
 
+/// Read a seeded file's mtime as whole seconds since the Unix epoch.
+fn modified_seconds(path: &Utf8Path) -> Result<u64, CacheError> {
+    let parent = path.parent().ok_or(CacheError::MissingFileName)?;
+    let name = path.file_name().ok_or(CacheError::MissingFileName)?;
+    let dir = cap_std::fs_utf8::Dir::open_ambient_dir(parent, cap_std::ambient_authority())?;
+    let seconds = dir
+        .metadata(name)?
+        .modified()?
+        .into_std()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| CacheError::ClockSkew)?
+        .as_secs();
+    Ok(seconds)
+}
+
 /// Write a well-formed cache entry stamped `updated_at` to `dir/name`.
 fn seed_entry(dir: &Utf8Path, name: &str, updated_at: u64) -> Result<Utf8PathBuf, CacheError> {
     let payload = serde_json::json!({ "value": "1", "updated_at": updated_at }).to_string();
@@ -347,11 +362,13 @@ fn sweep_reclaims_a_stale_orphaned_temp_file(workspace: Workspace) {
 #[rstest]
 fn sweep_keeps_an_in_flight_temp_file(workspace: Workspace) {
     let (_temp_dir, dir) = workspace.expect("workspace");
-    seed_raw(&dir, ORPHAN_NAME, PARTIAL_PAYLOAD).expect("seed in-flight temp file");
-    // The real clock is the point: a temp file belonging to a writer that is
-    // still running was created moments ago, and removing it would corrupt
-    // that write. Age is the only discriminator, so it must hold here.
-    read_then_sweep(&dir).expect("expired read and sweep");
+    let path = seed_raw(&dir, ORPHAN_NAME, PARTIAL_PAYLOAD).expect("seed in-flight temp file");
+    let modified = modified_seconds(&path).expect("read in-flight file mtime");
+    let mut clock = MockClock::new();
+    let seconds = i64::try_from(modified).expect("seeded mtime fits in i64");
+    let now = chrono::DateTime::from_timestamp(seconds, 0).expect("seeded mtime is valid");
+    clock.expect_utc().returning(move || now);
+    sweep_cache_dir(&dir, &clock, SWEEP_TTL).expect("sweep");
     assert_eq!(
         entry_names(&dir).expect("list directory"),
         vec![ORPHAN_NAME],

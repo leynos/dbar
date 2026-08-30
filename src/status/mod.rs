@@ -15,17 +15,15 @@
 //! configuration error, so it fails the whole command with a message naming
 //! the offending format string rather than rendering a wrong clock.
 
-use std::io::{self, ErrorKind};
-
 use camino::{Utf8Path, Utf8PathBuf};
 use mockable::Clock;
 
-use crate::cache::{self, CacheLookup};
+use crate::cache::{self, CacheError, CacheLookup};
 use crate::command::CommandRunner;
-use crate::config::StatusArgs;
+use crate::config::{RefreshArgs, StatusArgs};
 use crate::error::DbarError;
 use crate::git::{self, GitProbeFailure};
-use crate::github::GitHubClient;
+use crate::github::{GitHubClient, GitHubError};
 use crate::render;
 use crate::tmux::{self, TmuxContext, TmuxProbeFailure};
 use crate::types::CacheTtlSeconds;
@@ -37,8 +35,8 @@ pub mod pr;
 use cache_key::pr_cache_path;
 use clock::render_clock;
 use pr::{
-    CacheOutcome, CacheWriteOutcome, PersistRequest, PersistSkipReason, PrLookupReport,
-    PrResolution,
+    CacheFailure, CacheOutcome, CacheWriteOutcome, GitHubLookupFailure, PersistRequest,
+    PersistSkipReason, PrLookupReport, PrResolution,
 };
 
 #[derive(Debug, Default)]
@@ -85,52 +83,27 @@ pub struct StatusReport {
 /// `StatusReport::line` and is byte-for-byte what that function returned, but
 /// the failures behind a degraded line are no longer discarded.
 ///
-/// # Examples
-///
-/// ```text
-/// // `runner` is any `CommandRunner`; a real one spawns `git` and `gh`,
-/// // so the tests inject `MockCommandRunner` instead.
-/// let args = StatusArgs::default();
-/// let github = GhCliClient::new(runner);
-/// let clock = DefaultClock;
-/// let report = build_status_report(&args, &runner, &clock, &github)?;
-/// for failure in report.diagnostics.describe_failures() {
-///     eprintln!("{failure}");
-/// }
-/// ```
-///
 /// # Errors
 ///
-/// Returns an error if the project directory cannot be resolved or
-/// `clock_format` is not a valid strftime format.
+/// Returns an error when `clock_format` is not a valid strftime format.
 pub fn build_status_report(
     args: &StatusArgs,
+    project_dir: &Utf8Path,
     runner: &dyn CommandRunner,
     clock: &dyn Clock,
-    github: &dyn GitHubClient,
 ) -> Result<StatusReport, DbarError> {
-    let project_dir = resolve_project_dir(args)?;
-    let project = git::project_name(runner, &project_dir);
-    let git_outcome = git::git_status(runner, &project_dir);
+    let project = git::project_name(runner, project_dir);
+    let git_outcome = git::git_status(runner, project_dir);
 
     // No branch means no lookup: the cache key and the branch heuristic both
     // need one, so a non-repository — and equally a detached `HEAD`, which has
-    // no branch to key on — simply has no PR segment. Nothing synthetic is
-    // substituted here, so no cache entry can be written under an invented
-    // branch name.
+    // no branch to key on — simply has no PR segment. `status` is deliberately
+    // a cache-only query; `refresh` owns the live GitHub lookup and mutation.
     let pr_report = git_outcome
         .status()
         .and_then(|status| status.branch.as_ref())
         .filter(|_| args.show_pr.unwrap_or(true))
-        .map(|branch| {
-            resolve_pr_number(&PrLookup {
-                args,
-                clock,
-                github,
-                project_dir: &project_dir,
-                branch: branch.as_ref(),
-            })
-        });
+        .map(|branch| load_cached_pr(args, clock, project_dir, branch.as_ref()));
 
     let tmux_resolution = tmux::resolve_context(
         runner,
@@ -169,10 +142,12 @@ pub fn build_status_report(
     })
 }
 
-/// Everything one PR lookup needs, grouped to keep the argument count down.
+/// Everything an explicit refresh needs, grouped to keep the argument count down.
 struct PrLookup<'a> {
-    /// The status arguments, for the cache directory and TTL.
-    args: &'a StatusArgs,
+    /// The cache-directory override.
+    cache_dir: Option<Utf8PathBuf>,
+    /// The cache TTL applied after configuration merging.
+    ttl: CacheTtlSeconds,
     /// The clock used to age cache entries.
     clock: &'a dyn Clock,
     /// The GitHub client consulted on a cache miss.
@@ -183,28 +158,47 @@ struct PrLookup<'a> {
     branch: &'a str,
 }
 
-fn resolve_project_dir(args: &StatusArgs) -> Result<Utf8PathBuf, DbarError> {
-    if let Some(path) = args.project_dir.clone() {
-        return Ok(path);
-    }
-    let current = std::env::current_dir()?;
-    let path = Utf8PathBuf::from_path_buf(current)
-        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "current directory is not UTF-8"))?;
-    Ok(path)
-}
-
-/// Resolve the PR number, performing the cache read and write here.
+/// Refresh the PR cache through the explicit GitHub and storage boundary.
 ///
 /// This is the only place that touches the cache: [`pr::decide`] states the
 /// policy and asks for a write, and this boundary carries it out, so a cache
 /// failure is reported rather than silently swallowed inside the policy.
+pub struct RefreshRequest<'a> {
+    /// Parsed refresh settings.
+    pub args: &'a RefreshArgs,
+    /// Directory whose branch is refreshed.
+    pub project_dir: &'a Utf8Path,
+    /// Branch that scopes the cached value.
+    pub branch: &'a str,
+    /// Clock used to timestamp and age entries.
+    pub clock: &'a dyn Clock,
+    /// Client used only by the explicit refresh operation.
+    pub github: &'a dyn GitHubClient,
+}
+
+/// Refresh one cached PR value through the explicit write boundary.
+pub fn refresh_pr_cache(request: &RefreshRequest<'_>) -> PrLookupReport {
+    let context = PrLookup {
+        cache_dir: request.args.cache_dir.clone(),
+        ttl: request.args.pr_cache_ttl_or_default(),
+        clock: request.clock,
+        github: request.github,
+        project_dir: request.project_dir,
+        branch: request.branch,
+    };
+    resolve_pr_number(&context)
+}
+
+/// Resolve the PR number, performing the cache read and write here.
 fn resolve_pr_number(context: &PrLookup<'_>) -> PrLookupReport {
-    match cache::resolve_cache_dir(context.args.cache_dir.clone()) {
+    match cache::resolve_cache_dir(context.cache_dir.clone()) {
         Ok(dir) => {
             let path = pr_cache_path(&dir, context.project_dir, context.branch);
             resolve_with_cache(context, &dir, &path)
         }
-        Err(error) => resolve_without_cache(context, CacheOutcome::DirUnavailable(error)),
+        Err(error) => {
+            resolve_without_cache(context, CacheOutcome::DirUnavailable(cache_failure(&error)))
+        }
     }
 }
 
@@ -217,7 +211,7 @@ fn resolve_pr_number(context: &PrLookup<'_>) -> PrLookupReport {
 fn resolve_with_cache(context: &PrLookup<'_>, dir: &Utf8Path, path: &Utf8Path) -> PrLookupReport {
     // Absent when no layer set a TTL, so the documented default is applied
     // after merging; a clap default would shadow the lower layers.
-    let ttl = context.args.pr_cache_ttl_or_default();
+    let ttl = context.ttl;
     match cache::load_cached_value(path, context.clock, ttl) {
         Ok(CacheLookup::Fresh(value)) => PrLookupReport {
             pr_number: pr::pr_from_cache_entry(value),
@@ -232,7 +226,11 @@ fn resolve_with_cache(context: &PrLookup<'_>, dir: &Utf8Path, path: &Utf8Path) -
         }
         // A corrupt or unreadable entry is treated as a miss for rendering
         // purposes, but the read failure is carried into the report.
-        Err(error) => lookup_and_persist(context, CacheOutcome::ReadFailed(error), Some(path)),
+        Err(error) => lookup_and_persist(
+            context,
+            CacheOutcome::ReadFailed(cache_failure(&error)),
+            Some(path),
+        ),
     }
 }
 
@@ -247,7 +245,7 @@ fn reclaim_expired_entries(
 ) -> CacheOutcome {
     match cache::sweep_cache_dir(dir, context.clock, ttl) {
         Ok(()) => CacheOutcome::Miss,
-        Err(error) => CacheOutcome::ReadFailed(error),
+        Err(error) => CacheOutcome::ReadFailed(cache_failure(&error)),
     }
 }
 
@@ -264,7 +262,8 @@ fn lookup_and_persist(
 ) -> PrLookupReport {
     let lookup = context
         .github
-        .pr_number(context.project_dir, context.branch);
+        .pr_number(context.project_dir, context.branch)
+        .map_err(|error| github_failure(&error));
     let decision = pr::decide(lookup, context.branch);
     let write = persist(context, path, decision.persist);
     PrLookupReport {
@@ -290,8 +289,61 @@ fn persist(
     };
     match cache::store_cached_value(target, context.clock, value) {
         Ok(()) => CacheWriteOutcome::Stored,
-        Err(error) => CacheWriteOutcome::Failed(error),
+        Err(error) => CacheWriteOutcome::Failed(cache_failure(&error)),
     }
+}
+
+/// Read a PR value for the status query without invoking GitHub or mutating
+/// the cache.
+fn load_cached_pr(
+    args: &StatusArgs,
+    clock: &dyn Clock,
+    project_dir: &Utf8Path,
+    branch: &str,
+) -> PrLookupReport {
+    let unavailable = || PrLookupReport {
+        pr_number: None,
+        cache: CacheOutcome::Miss,
+        resolution: PrResolution::NoPr,
+        write: CacheWriteOutcome::Skipped(PersistSkipReason::StatusReadOnly),
+    };
+    let Ok(dir) = cache::resolve_cache_dir(args.cache_dir.clone()) else {
+        return PrLookupReport {
+            cache: CacheOutcome::DirUnavailable(CacheFailure::DirectoryUnavailable),
+            ..unavailable()
+        };
+    };
+    let path = pr_cache_path(&dir, project_dir, branch);
+    match cache::load_cached_value(&path, clock, args.pr_cache_ttl_or_default()) {
+        Ok(CacheLookup::Fresh(value)) => PrLookupReport {
+            pr_number: pr::pr_from_cache_entry(value),
+            cache: CacheOutcome::Hit,
+            resolution: PrResolution::FromCache,
+            write: CacheWriteOutcome::Skipped(PersistSkipReason::ServedFromCache),
+        },
+        Ok(CacheLookup::Missing | CacheLookup::Expired) => unavailable(),
+        Err(_) => PrLookupReport {
+            cache: CacheOutcome::ReadFailed(CacheFailure::Read),
+            ..unavailable()
+        },
+    }
+}
+
+/// Convert a storage adapter error at the application boundary.
+const fn cache_failure(error: &CacheError) -> CacheFailure {
+    match error {
+        CacheError::MissingBaseDir | CacheError::InvalidUtf8 => CacheFailure::DirectoryUnavailable,
+        CacheError::Serde(_) | CacheError::EntryTooLarge { .. } => CacheFailure::Read,
+        CacheError::MissingFileName
+        | CacheError::ClockSkew
+        | CacheError::Io(_)
+        | CacheError::Retention { .. } => CacheFailure::Write,
+    }
+}
+
+/// Convert a GitHub adapter error at the application boundary.
+const fn github_failure(_error: &GitHubError) -> GitHubLookupFailure {
+    GitHubLookupFailure::Unavailable
 }
 
 #[cfg(test)]

@@ -261,14 +261,13 @@ fn git_status_reports_a_malformed_repository_probe(healthy_runner: Answers) {
     let outcome = git_status(&runner, repo_dir());
     // The rendered contract is the same as "not a repository" ...
     assert!(outcome.status().is_none());
-    // ... but the cause is now inspectable.
+    // ... but the fixed failure category remains inspectable.
     let failure = expect_single_failure(outcome);
     assert!(matches!(
         &failure,
         GitProbeFailure::MalformedOutput {
             probe: GitProbe::Repository,
-            output,
-        } if output == "banana"
+        }
     ));
 }
 
@@ -338,9 +337,20 @@ fn git_status_reports_a_malformed_porcelain_line(healthy_runner: Answers) {
         report.degradations.as_slice(),
         [GitProbeFailure::MalformedOutput {
             probe: GitProbe::WorktreeStatus,
-            output,
-        }] if output == "M"
+        }]
     ));
+}
+
+#[rstest]
+fn malformed_origin_diagnostics_never_retain_credentials() {
+    let origin = "https://user:secret@example.test/";
+    let runner = Answers::default()
+        .answering_in(Utf8Path::new("/tmp/demo"), ORIGIN_ARGS, origin)
+        .build();
+    let failure =
+        expect_single_failure_in(project_name(&runner, Utf8Path::new("/tmp/demo")).into_failures());
+    assert!(!failure.to_string().contains("secret"));
+    assert!(!format!("{failure:?}").contains("secret"));
 }
 
 #[rstest]

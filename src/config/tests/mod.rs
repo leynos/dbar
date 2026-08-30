@@ -43,14 +43,18 @@ const ISOLATING: [(&str, &str); 5] = [
 fn status_of(command: DbarCommand) -> StatusArgs {
     match command {
         DbarCommand::Status(args) => args,
-        DbarCommand::Install(_) => panic!("expected the status subcommand"),
+        DbarCommand::Refresh(_) | DbarCommand::Install(_) => {
+            panic!("expected the status subcommand")
+        }
     }
 }
 
 fn install_of(command: DbarCommand) -> InstallArgs {
     match command {
         DbarCommand::Install(args) => args,
-        DbarCommand::Status(_) => panic!("expected the install subcommand"),
+        DbarCommand::Refresh(_) | DbarCommand::Status(_) => {
+            panic!("expected the install subcommand")
+        }
     }
 }
 

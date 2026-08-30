@@ -4,7 +4,6 @@
 //! and because that module is already at the line ceiling the repository lints
 //! enforce.
 
-use std::cell::Cell;
 use std::collections::HashMap;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -15,38 +14,12 @@ use super::build_status_report;
 use crate::command::{CommandError, CommandOutput, CommandSpec, MockCommandRunner};
 use crate::config::StatusArgs;
 use crate::git::git_command;
-use crate::github::{GitHubClient, GitHubError};
-use crate::types::PrNumber;
 
 /// The project directory every probe in these tests is rooted at.
 const PROJECT_DIR: &str = "/projects/demo";
 
 /// The glyph the renderer draws before the branch label.
 const GLYPH_BRANCH: &str = "\u{f418}";
-
-/// A GitHub client that must never be consulted, counting any call.
-struct CountingGitHubClient {
-    calls: Cell<usize>,
-}
-
-impl CountingGitHubClient {
-    const fn new() -> Self {
-        Self {
-            calls: Cell::new(0),
-        }
-    }
-}
-
-impl GitHubClient for CountingGitHubClient {
-    fn pr_number(
-        &self,
-        _project_dir: &Utf8Path,
-        _branch: &str,
-    ) -> Result<Option<PrNumber>, GitHubError> {
-        self.calls.set(self.calls.get() + 1);
-        Ok(Some(PrNumber::new("42")))
-    }
-}
 
 /// Build the spec one `git` probe rooted at the project directory produces.
 fn git_spec(args: &[&str]) -> CommandSpec {
@@ -101,18 +74,20 @@ fn a_detached_head_renders_the_label_without_looking_up_a_pr() {
         ..StatusArgs::default()
     };
     let clock = DefaultClock;
-    let github = CountingGitHubClient::new();
-
-    let report = build_status_report(&args, &detached_head_runner(), &clock, &github)
-        .expect("a detached HEAD must not fail the command");
+    let report = build_status_report(
+        &args,
+        Utf8Path::new(PROJECT_DIR),
+        &detached_head_runner(),
+        &clock,
+    )
+    .expect("a detached HEAD must not fail the command");
 
     // The rendered contract is unchanged: the branch segment still reads
     // "detached" ...
     assert!(report.line.contains(GLYPH_BRANCH));
     assert!(report.line.contains("detached"));
-    // ... but no synthetic branch name reaches the lookup, so nothing is
-    // queried and nothing can be cached under an invented key.
-    assert_eq!(github.calls.get(), 0);
+    // ... but no synthetic branch name reaches the cache key, so no PR
+    // segment is rendered under an invented branch name.
     assert!(report.diagnostics.pr.is_none());
     // A detached HEAD is an ordinary state, so no git probe is diagnosed.
     assert!(report.diagnostics.git.is_empty());

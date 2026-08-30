@@ -19,6 +19,7 @@ wait-timeout = "0.2.1"
 
 [dev-dependencies]
 assert_cmd = "2.1.1"
+chrono = "0.4.42"
 insta = "1.46.0"
 mockall = "0.15.0"
 proptest = "1.9.0"

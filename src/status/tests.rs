@@ -135,7 +135,8 @@ pub(super) fn lookup(
     clock: &dyn Clock,
 ) -> PrLookupReport {
     resolve_pr_number(&PrLookup {
-        args,
+        cache_dir: args.cache_dir.clone(),
+        ttl: args.pr_cache_ttl_or_default(),
         clock,
         github,
         project_dir: Utf8Path::new(PROJECT_DIR),
@@ -283,13 +284,14 @@ fn an_unavailable_cache_directory_skips_every_cache_access() {
     let args = StatusArgs::default();
     let report = resolve_without_cache(
         &PrLookup {
-            args: &args,
+            cache_dir: args.cache_dir.clone(),
+            ttl: args.pr_cache_ttl_or_default(),
             clock: &clock,
             github: &github,
             project_dir: Utf8Path::new(PROJECT_DIR),
             branch: BRANCH,
         },
-        CacheOutcome::DirUnavailable(crate::cache::CacheError::MissingBaseDir),
+        CacheOutcome::DirUnavailable(CacheFailure::DirectoryUnavailable),
     );
 
     assert_eq!(rendered(&report).as_deref(), Some("42"));
@@ -319,7 +321,8 @@ fn a_failed_cache_write_is_reported(cache_root: io::Result<(TempDir, Utf8PathBuf
     let github = StubGitHubClient::new(Reply::Found("42"));
     let args = args_with_cache(&cache_dir);
     let context = PrLookup {
-        args: &args,
+        cache_dir: args.cache_dir.clone(),
+        ttl: args.pr_cache_ttl_or_default(),
         clock: &clock,
         github: &github,
         project_dir: Utf8Path::new(PROJECT_DIR),
@@ -340,7 +343,8 @@ fn a_skipped_write_records_its_reason() {
     let github = StubGitHubClient::new(Reply::NoPr);
     let args = StatusArgs::default();
     let context = PrLookup {
-        args: &args,
+        cache_dir: args.cache_dir.clone(),
+        ttl: args.pr_cache_ttl_or_default(),
         clock: &clock,
         github: &github,
         project_dir: Utf8Path::new(PROJECT_DIR),

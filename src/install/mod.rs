@@ -28,6 +28,14 @@ pub enum RunMode {
 
 impl RunMode {
     /// Build the mode from a `--dry-run` flag.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use dbar::install::RunMode;
+    /// assert_eq!(RunMode::from_dry_run(true), RunMode::DryRun);
+    /// assert_eq!(RunMode::from_dry_run(false), RunMode::Write);
+    /// ```
     #[must_use]
     pub const fn from_dry_run(is_dry_run: bool) -> Self {
         if is_dry_run {
@@ -55,6 +63,14 @@ pub enum Width {
 
 impl Width {
     /// Build the width from a `--full` flag.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use dbar::install::Width;
+    /// assert_eq!(Width::from_full(true), Width::Full);
+    /// assert_eq!(Width::from_full(false), Width::Plain);
+    /// ```
     #[must_use]
     pub const fn from_full(is_full: bool) -> Self {
         if is_full { Self::Full } else { Self::Plain }

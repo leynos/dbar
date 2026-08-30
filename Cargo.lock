@@ -414,6 +414,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "cap-std 4.0.2",
+ "chrono",
  "clap",
  "directories",
  "insta",

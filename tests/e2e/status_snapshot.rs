@@ -84,6 +84,21 @@ fn status_snapshot_clean_git_full_width_with_pr() {
     let temp_dir = TempDir::new().expect("temp dir");
     let repo_dir = create_project_dir(&temp_dir).expect("create project dir");
     init_repo(&repo_dir).expect("init repo");
+    let cache_dir =
+        Utf8PathBuf::from_path_buf(temp_dir.path().join("cache")).expect("cache path is UTF-8");
+
+    let mut refresh = assert_cmd::cargo::cargo_bin_cmd!("dbar");
+    refresh.args([
+        "refresh",
+        "--project-dir",
+        repo_dir.as_str(),
+        "--cache-dir",
+        cache_dir.as_str(),
+        "--github-mock-pr",
+        "42",
+    ]);
+    isolate_git_redirection(&mut refresh);
+    refresh.assert().success();
 
     let client_width = CLIENT_WIDTH.to_string();
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("dbar");
@@ -93,8 +108,8 @@ fn status_snapshot_clean_git_full_width_with_pr() {
         repo_dir.as_str(),
         "--show-pr",
         "true",
-        "--github-mock-pr",
-        "42",
+        "--cache-dir",
+        cache_dir.as_str(),
         "--client-width",
         client_width.as_str(),
         "--session",

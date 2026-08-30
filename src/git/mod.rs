@@ -118,12 +118,10 @@ pub enum GitProbeFailure {
         source: CommandError,
     },
     /// The probe ran but produced output this module cannot parse.
-    #[error("`{probe}` produced unusable output: {output:?}")]
+    #[error("`{probe}` produced unusable output")]
     MalformedOutput {
         /// The probe whose output could not be parsed.
         probe: GitProbe,
-        /// The offending output, trimmed to the fragment that failed.
-        output: String,
     },
 }
 

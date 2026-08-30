@@ -42,6 +42,60 @@ fn render_includes_branch_and_pr(tmux_context: TmuxContext) {
 }
 
 #[rstest]
+fn render_emits_worktree_and_divergence_indicators_in_order() {
+    let project = ProjectName::new("demo");
+    let status = GitStatus {
+        branch: Some(BranchName::new("main")),
+        dirty: false,
+        staged: false,
+        ahead: AheadCount::new(3),
+        behind: BehindCount::new(2),
+        is_worktree: true,
+    };
+    let rendered = render_status_line(&RenderContext {
+        project: &project,
+        git_status: Some(&status),
+        pr_number: None,
+        tmux: None,
+        clock: None,
+        client_width: None,
+    });
+
+    let expected = concat!(
+        "#[fg=colour117,bg=colour24] demo #[fg=colour24,bg=default]\u{e0c6}",
+        "#[default]#[default] #[fg=colour114]\u{f418} main ",
+        "#[fg=colour117]\u{f432}3 #[fg=colour203]\u{f433}2 #[default]",
+        " #[fg=colour221]\u{f0e69}#[default]"
+    );
+    assert_eq!(rendered, expected);
+}
+
+#[rstest]
+fn render_omits_zero_divergence_indicators() {
+    let project = ProjectName::new("demo");
+    let status = GitStatus {
+        branch: Some(BranchName::new("main")),
+        dirty: false,
+        staged: false,
+        ahead: AheadCount::new(0),
+        behind: BehindCount::new(0),
+        is_worktree: false,
+    };
+    let rendered = render_status_line(&RenderContext {
+        project: &project,
+        git_status: Some(&status),
+        pr_number: None,
+        tmux: None,
+        clock: None,
+        client_width: None,
+    });
+
+    assert!(!rendered.contains(GLYPH_AHEAD));
+    assert!(!rendered.contains(GLYPH_BEHIND));
+    assert!(!rendered.contains(GLYPH_WORKTREE));
+}
+
+#[rstest]
 fn render_labels_an_absent_branch_as_detached(tmux_context: TmuxContext) {
     let project = ProjectName::new("demo");
     let status = GitStatus {

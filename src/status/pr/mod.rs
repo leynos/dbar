@@ -15,9 +15,9 @@
 //! | --- | --- |
 //! | Fresh cache entry holding a number ([`CacheOutcome::Hit`]) | that number, GitHub is not consulted |
 //! | Fresh cache entry holding the empty string | no PR segment, GitHub is not consulted |
-//! | No entry or an expired entry ([`CacheOutcome::Miss`]) | whatever the GitHub lookup resolves to |
-//! | Cache directory unresolvable ([`CacheOutcome::DirUnavailable`]) | as for a miss; nothing is read or written |
-//! | Cache read failed ([`CacheOutcome::ReadFailed`]) | as for a miss; the lookup proceeds |
+//! | No entry or an expired entry ([`CacheOutcome::Miss`]) | no PR segment until `dbar refresh` stores a value |
+//! | Cache directory unresolvable ([`CacheOutcome::DirUnavailable`]) | no PR segment; nothing is read or written |
+//! | Cache read failed ([`CacheOutcome::ReadFailed`]) | no PR segment; `dbar refresh` can retry the lookup |
 //! | GitHub returned a number ([`PrResolution::GitHub`]) | that number, and it is cached |
 //! | GitHub returned no PR ([`PrResolution::BranchFallback`], [`PrResolution::NoPr`]) | the branch-derived number if the branch names one, otherwise no PR segment; either way the result is cached |
 //! | GitHub lookup failed ([`PrResolution::LookupFailed`]) | the branch-derived number if the branch names one, otherwise no PR segment; **nothing is cached**, so a transient failure cannot poison the value for a whole TTL |
@@ -25,9 +25,45 @@
 
 use std::fmt;
 
-use crate::cache::CacheError;
-use crate::github::GitHubError;
 use crate::types::PrNumber;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A cache failure expressed without exposing an adapter error type.
+pub enum CacheFailure {
+    /// The cache directory could not be resolved.
+    DirectoryUnavailable,
+    /// Loading a cache entry failed.
+    Read,
+    /// Persisting a cache entry failed.
+    Write,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A GitHub lookup failure expressed without exposing the client adapter.
+pub enum GitHubLookupFailure {
+    /// The GitHub command could not provide an answer.
+    Unavailable,
+}
+
+impl CacheFailure {
+    /// The bounded category safe to include in diagnostics.
+    const fn category(self) -> &'static str {
+        match self {
+            Self::DirectoryUnavailable => "directory-unavailable",
+            Self::Read => "read",
+            Self::Write => "write",
+        }
+    }
+}
+
+impl GitHubLookupFailure {
+    /// The bounded category safe to include in diagnostics.
+    const fn category(self) -> &'static str {
+        match self {
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
 
 #[derive(Debug)]
 /// What the on-disk cache contributed to a PR lookup.
@@ -38,9 +74,9 @@ pub enum CacheOutcome {
     Miss,
     /// The cache directory could not be resolved, so no entry was consulted
     /// and none can be written.
-    DirUnavailable(CacheError),
+    DirUnavailable(CacheFailure),
     /// Reading the entry failed, so the lookup proceeded as for a miss.
-    ReadFailed(CacheError),
+    ReadFailed(CacheFailure),
 }
 
 #[derive(Debug)]
@@ -51,7 +87,7 @@ pub enum CacheWriteOutcome {
     /// The value was written.
     Stored,
     /// The write was attempted and failed. The rendered value is unaffected.
-    Failed(CacheError),
+    Failed(CacheFailure),
 }
 
 impl fmt::Display for CacheWriteOutcome {
@@ -59,7 +95,7 @@ impl fmt::Display for CacheWriteOutcome {
         match self {
             Self::Skipped(reason) => write!(f, "not written ({reason})"),
             Self::Stored => f.write_str("written"),
-            Self::Failed(error) => write!(f, "write failed: {error}"),
+            Self::Failed(_) => f.write_str("write failed"),
         }
     }
 }
@@ -77,7 +113,7 @@ pub enum PrResolution {
     NoPr,
     /// The GitHub lookup failed. The branch name was consulted instead, so
     /// the report may still carry a PR number.
-    LookupFailed(GitHubError),
+    LookupFailed(GitHubLookupFailure),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +127,8 @@ pub enum PersistSkipReason {
     LookupFailed,
     /// No cache path was available, so there is nowhere to write.
     CacheUnavailable,
+    /// `status` is a read-only query; only `refresh` persists cache values.
+    StatusReadOnly,
 }
 
 impl fmt::Display for PersistSkipReason {
@@ -99,6 +137,7 @@ impl fmt::Display for PersistSkipReason {
             Self::ServedFromCache => "served from the cache",
             Self::LookupFailed => "the lookup failed",
             Self::CacheUnavailable => "the cache is unavailable",
+            Self::StatusReadOnly => "status reads the cache only",
         })
     }
 }
@@ -156,21 +195,28 @@ impl PrLookupReport {
     pub fn describe_failures(&self) -> Vec<String> {
         let cache = match &self.cache {
             CacheOutcome::Hit | CacheOutcome::Miss => None,
-            CacheOutcome::DirUnavailable(error) => {
-                Some(format!("PR cache directory unavailable: {error}"))
+            CacheOutcome::DirUnavailable(failure) => Some(format!(
+                "PR cache directory unavailable ({})",
+                failure.category()
+            )),
+            CacheOutcome::ReadFailed(failure) => {
+                Some(format!("PR cache read failed ({})", failure.category()))
             }
-            CacheOutcome::ReadFailed(error) => Some(format!("PR cache read failed: {error}")),
         };
         let resolution = match &self.resolution {
             PrResolution::FromCache
             | PrResolution::GitHub
             | PrResolution::BranchFallback
             | PrResolution::NoPr => None,
-            PrResolution::LookupFailed(error) => Some(format!("PR lookup failed: {error}")),
+            PrResolution::LookupFailed(failure) => {
+                Some(format!("PR lookup failed ({})", failure.category()))
+            }
         };
         let write = match &self.write {
             CacheWriteOutcome::Skipped(_) | CacheWriteOutcome::Stored => None,
-            CacheWriteOutcome::Failed(error) => Some(format!("PR cache write failed: {error}")),
+            CacheWriteOutcome::Failed(failure) => {
+                Some(format!("PR cache write failed ({})", failure.category()))
+            }
         };
         [cache, resolution, write].into_iter().flatten().collect()
     }
@@ -208,7 +254,7 @@ pub fn pr_from_cache_entry(value: String) -> Option<PrNumber> {
 /// assert!(matches!(decision.resolution, PrResolution::BranchFallback));
 /// assert_eq!(decision.persist, PersistRequest::Store("7".to_owned()));
 /// ```
-pub fn decide(lookup: Result<Option<PrNumber>, GitHubError>, branch: &str) -> PrDecision {
+pub fn decide(lookup: Result<Option<PrNumber>, GitHubLookupFailure>, branch: &str) -> PrDecision {
     match lookup {
         Ok(Some(pr_number)) => PrDecision {
             persist: PersistRequest::Store(pr_number.to_string()),

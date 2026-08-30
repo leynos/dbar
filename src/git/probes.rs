@@ -119,10 +119,7 @@ pub(super) fn probe_repository(
     match stdout.trim() {
         "true" => Ok(true),
         "false" => Ok(false),
-        other => Err(GitProbeFailure::MalformedOutput {
-            probe,
-            output: other.to_owned(),
-        }),
+        _ => Err(GitProbeFailure::MalformedOutput { probe }),
     }
 }
 
@@ -170,15 +167,7 @@ pub(super) fn probe_origin_name(
     };
 
     parse_origin_name(&stdout).map_or_else(
-        || {
-            Probed::degraded(
-                None,
-                GitProbeFailure::MalformedOutput {
-                    probe,
-                    output: stdout.trim().to_owned(),
-                },
-            )
-        },
+        || Probed::degraded(None, GitProbeFailure::MalformedOutput { probe }),
         |name| Probed::ok(Some(name)),
     )
 }
@@ -217,7 +206,7 @@ pub(super) fn probe_worktree_status(
     let value = (summary.dirty, summary.staged);
     summary.malformed_line.map_or_else(
         || Probed::ok(value),
-        |output| Probed::degraded(value, GitProbeFailure::MalformedOutput { probe, output }),
+        |_| Probed::degraded(value, GitProbeFailure::MalformedOutput { probe }),
     )
 }
 
@@ -281,15 +270,7 @@ pub(super) fn probe_upstream_counts(
     };
 
     parse_upstream_counts(&stdout).map_or_else(
-        || {
-            Probed::degraded(
-                fallback,
-                GitProbeFailure::MalformedOutput {
-                    probe,
-                    output: stdout.trim().to_owned(),
-                },
-            )
-        },
+        || Probed::degraded(fallback, GitProbeFailure::MalformedOutput { probe }),
         Probed::ok,
     )
 }
