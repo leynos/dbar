@@ -393,9 +393,10 @@ Delivered dependencies:
 - runtime: `ortho_config`, `serde`, `serde_json`, `camino`, `cap-std`,
   `thiserror`, `directories`, `mockable`, `clap`, `rustix`,
   `unicode-width`, `wait-timeout`
-- dev: `rstest`, `rstest-bdd`, `rstest-bdd-macros`, `assert_cmd`, `insta`,
-  `tempfile`, `mockall` (mandatory for the `CommandRunner`/`GitHubClient`
-  seams, not an optional convenience), `proptest` (property tests)
+- dev: `rstest`, `rstest-bdd`, `rstest-bdd-macros`, `assert_cmd`, `chrono`,
+  `insta`, `tempfile`, `mockall` (mandatory for the
+  `CommandRunner`/`GitHubClient` seams, not an optional convenience), and
+  `proptest` (property tests)
 
 ## Revision note (required when editing an ExecPlan)
 
@@ -441,3 +442,8 @@ the session may spend one post-reap signal to evict descendants that still
 hold captured pipes open. The implementation and developer documentation now
 record the `Unsignalled`, `Signalled`, `Reaped`, and `Sealed` transitions and
 the rule that a failed signal restores the previous state.
+
+Revised 2026-08-31 to align the delivered development dependency inventory
+with `Cargo.toml`, including `chrono` for deterministic timestamp fixtures,
+and to document the `make typecheck` gate and atomic install wording in the
+developer guide.

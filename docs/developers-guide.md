@@ -75,8 +75,8 @@ entry points invoked from `main`: `run_status`, `run_refresh`, and
   passing bare `String`/integer values between modules.
 - `install/mod.rs` — `install` accepts a configuration path, position, run
   mode, and width, then inserts or updates a marker-delimited tmux snippet in
-  a configuration file. It
-  and backs up the previous contents before replacing the target atomically:
+  a configuration file. It backs up the previous contents before replacing the
+  target atomically:
   the new contents are written to a uniquely named temporary file, which
   inherits the target's permissions, then renamed over the target. `RunMode`
   (`DryRun`/`Write`) and `Width` (`Full`/`Plain`) replaced what were originally
@@ -229,6 +229,8 @@ committing:
 - `make fmt` — runs `cargo fmt --all` and `mdformat-all`.
 - `make check-fmt` — verifies formatting without modifying files
   (`cargo fmt --all -- --check`).
+- `make typecheck` — runs `cargo check` for every target with every feature
+  enabled.
 - `make markdownlint` — runs `markdownlint-cli2` over every Markdown file,
   then the spelling gate.
 - `make spelling` — regenerates `typos.toml` from
@@ -318,12 +320,16 @@ Dependencies are pinned with caret requirements. Notable runtime crates:
 `wait-timeout` (bounding child-process execution), `directories` (XDG cache
 resolution), `ortho_config` (layered CLI/env/config parsing), and `mockable`
 (the `Clock` trait used to inject time). Dev-only crates (`rstest`,
-`rstest-bdd`, `rstest-bdd-macros`, `assert_cmd`, `insta`, `tempfile`) back the
-three test layers above, alongside `mockall` and `proptest`: `mockall`
-generates the `MockCommandRunner` double described under "Dependency-injection
-seams", and is mandatory for every seam it covers — a bespoke, hand-rolled stub
-is not an acceptable substitute; and `proptest` drives the property-based tests
-in `src/install/property_tests.rs`.
+`rstest-bdd`, `rstest-bdd-macros`, `assert_cmd`, `chrono`, `insta`, and
+`tempfile`) back the three test layers above: `rstest` supplies fixtures and
+parameterized unit tests; `rstest-bdd` and `rstest-bdd-macros` drive the
+behavioural scenarios; `assert_cmd` invokes the binary in end-to-end tests;
+`chrono` supplies deterministic timestamps for cache tests; `insta` records
+rendered-output snapshots; and `tempfile` creates isolated test directories.
+`mockall` generates the `MockCommandRunner` double described under
+"Dependency-injection seams", and is mandatory for every seam it covers — a
+bespoke, hand-rolled stub is not an acceptable substitute. `proptest` drives
+the property-based tests in `src/install/property_tests.rs`.
 
 ### Real command execution
 
