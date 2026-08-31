@@ -15,7 +15,7 @@ use mockable::Clock;
 
 use crate::types::CacheTtlSeconds;
 
-use super::{CacheEntry, CacheError, read_bounded, to_epoch_seconds};
+use super::{CacheEntry, CacheError, acquire_mutation_lock, read_bounded, to_epoch_seconds};
 
 /// Names listed from the cache directory in one retention sweep.
 ///
@@ -108,6 +108,7 @@ pub fn sweep_cache_dir(
     ttl: CacheTtlSeconds,
 ) -> Result<(), CacheError> {
     let dir = Dir::open_ambient_dir(dir_path, ambient_authority())?;
+    let _lock = acquire_mutation_lock(&dir)?;
     let now = to_epoch_seconds(clock.utc().timestamp())?;
     sweep_expired_entries(&SweepContext {
         dir: &dir,

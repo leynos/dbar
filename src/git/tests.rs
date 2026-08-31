@@ -11,10 +11,12 @@ use std::io;
 /// The directory every stubbed probe is rooted at.
 const REPO_DIR: &str = "/tmp/repo";
 
-/// Argument lists for the four probes `git_status` runs.
+/// Argument lists for the probes `git_status` runs.
 const REPOSITORY_ARGS: &[&str] = &["rev-parse", "--is-inside-work-tree"];
 const BRANCH_ARGS: &[&str] = &["branch", "--show-current"];
 const PORCELAIN_ARGS: &[&str] = &["status", "--porcelain"];
+const TRACKED_PATHS_ARGS: &[&str] = &["ls-files", "-z"];
+const FILTER_ATTRIBUTES_ARGS: &[&str] = &["check-attr", "-z", "filter", "--", "tracked.txt"];
 const UPSTREAM_ARGS: &[&str] = &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"];
 /// Arguments for the project-name probe.
 const ORIGIN_ARGS: &[&str] = &["remote", "get-url", "origin"];
@@ -73,12 +75,14 @@ impl Answers {
     }
 }
 
-/// Answers covering all four probes with healthy defaults.
+/// Answers covering every probe with healthy defaults.
 #[fixture]
 fn healthy_runner() -> Answers {
     Answers::default()
         .answering(REPOSITORY_ARGS, "true")
         .answering(BRANCH_ARGS, "main\n")
+        .answering(TRACKED_PATHS_ARGS, "tracked.txt\0")
+        .answering(FILTER_ATTRIBUTES_ARGS, "tracked.txt\0filter\0unspecified\0")
         .answering(PORCELAIN_ARGS, "")
         .answering(UPSTREAM_ARGS, "0\t0")
 }

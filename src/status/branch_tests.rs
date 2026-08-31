@@ -11,10 +11,10 @@ use mockable::DefaultClock;
 use rstest::rstest;
 use tempfile::TempDir;
 
-use super::build_status_report;
 use super::pr_cache_path;
 use super::tests::{args_with_cache, exists, utf8_path};
-use crate::cache;
+use super::{StatusDependencies, build_status_report};
+use crate::cache::{self, FileCacheStorage};
 use crate::command::{CommandError, CommandOutput, CommandSpec, MockCommandRunner};
 use crate::config::StatusArgs;
 use crate::git::git_command;
@@ -44,6 +44,11 @@ fn detached_head_runner() -> MockCommandRunner {
         (git_spec(&["rev-parse", "--is-inside-work-tree"]), "true"),
         // git's documented way of saying "no current branch".
         (git_spec(&["branch", "--show-current"]), ""),
+        (git_spec(&["ls-files", "-z"]), "tracked.txt\0"),
+        (
+            git_spec(&["check-attr", "-z", "filter", "--", "tracked.txt"]),
+            "tracked.txt\0filter\0unspecified\0",
+        ),
         (git_spec(&["status", "--porcelain"]), ""),
         (
             git_spec(&["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]),
@@ -74,6 +79,11 @@ fn named_branch_runner() -> MockCommandRunner {
         (
             git_spec(&["branch", "--show-current"]),
             "feature/cache-only",
+        ),
+        (git_spec(&["ls-files", "-z"]), "tracked.txt\0"),
+        (
+            git_spec(&["check-attr", "-z", "filter", "--", "tracked.txt"]),
+            "tracked.txt\0filter\0unspecified\0",
         ),
         (git_spec(&["status", "--porcelain"]), ""),
         (
@@ -120,13 +130,14 @@ fn a_detached_head_renders_the_label_without_looking_up_a_pr() {
         ..StatusArgs::default()
     };
     let clock = DefaultClock;
-    let report = build_status_report(
-        &args,
-        Utf8Path::new(PROJECT_DIR),
-        &detached_head_runner(),
-        &clock,
-    )
-    .expect("a detached HEAD must not fail the command");
+    let runner = detached_head_runner();
+    let dependencies = StatusDependencies {
+        runner: &runner,
+        clock: &clock,
+        cache: &FileCacheStorage,
+    };
+    let report = build_status_report(&args, Utf8Path::new(PROJECT_DIR), &dependencies)
+        .expect("a detached HEAD must not fail the command");
 
     // The rendered contract is unchanged: the branch segment still reads
     // "detached" ...
@@ -145,13 +156,14 @@ fn status_cache_miss_is_read_only() {
     let cache_dir = utf8_path(&cache_root).expect("UTF-8 cache path");
     let args = status_args(&cache_dir);
     let clock = DefaultClock;
-    let report = build_status_report(
-        &args,
-        Utf8Path::new(PROJECT_DIR),
-        &named_branch_runner(),
-        &clock,
-    )
-    .expect("healthy status assembly");
+    let runner = named_branch_runner();
+    let dependencies = StatusDependencies {
+        runner: &runner,
+        clock: &clock,
+        cache: &FileCacheStorage,
+    };
+    let report = build_status_report(&args, Utf8Path::new(PROJECT_DIR), &dependencies)
+        .expect("healthy status assembly");
 
     let cache_path = pr_cache_path(&cache_dir, Utf8Path::new(PROJECT_DIR), "feature/cache-only");
     assert!(
@@ -171,12 +183,17 @@ fn status_reads_a_preseeded_cache_entry_without_refreshing_it() {
     let cache_path = pr_cache_path(&cache_dir, Utf8Path::new(PROJECT_DIR), "feature/cache-only");
     let clock = DefaultClock;
     cache::store_cached_value(&cache_path, &clock, "42").expect("seed cache");
+    let runner = named_branch_runner();
+    let dependencies = StatusDependencies {
+        runner: &runner,
+        clock: &clock,
+        cache: &FileCacheStorage,
+    };
 
     let report = build_status_report(
         &status_args(&cache_dir),
         Utf8Path::new(PROJECT_DIR),
-        &named_branch_runner(),
-        &clock,
+        &dependencies,
     )
     .expect("healthy status assembly");
 

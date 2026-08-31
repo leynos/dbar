@@ -1,14 +1,13 @@
 //! Tests for status-line rendering, style tags, and glyph emission.
 use super::*;
-use crate::tmux::TmuxContext;
 use crate::types::{AheadCount, BehindCount, BranchName, PrNumber, ProjectName};
 use proptest::prelude::*;
 use rstest::{fixture, rstest};
 
 /// tmux metadata for a pane on the default server.
 #[fixture]
-fn tmux_context() -> TmuxContext {
-    TmuxContext {
+fn tmux_context() -> RenderTmuxContext {
+    RenderTmuxContext {
         session: Some("session".into()),
         window: Some("1".into()),
         pane: Some("%0".into()),
@@ -17,7 +16,7 @@ fn tmux_context() -> TmuxContext {
 }
 
 #[rstest]
-fn render_includes_branch_and_pr(tmux_context: TmuxContext) {
+fn render_includes_branch_and_pr(tmux_context: RenderTmuxContext) {
     let project = ProjectName::new("demo");
     let status = GitStatus {
         branch: Some(BranchName::new("main")),
@@ -96,7 +95,7 @@ fn render_omits_zero_divergence_indicators() {
 }
 
 #[rstest]
-fn render_labels_an_absent_branch_as_detached(tmux_context: TmuxContext) {
+fn render_labels_an_absent_branch_as_detached(tmux_context: RenderTmuxContext) {
     let project = ProjectName::new("demo");
     let status = GitStatus {
         branch: None,
@@ -128,7 +127,7 @@ fn layout_right_justifies_with_width() {
 }
 
 #[rstest]
-fn render_places_clock_after_tmux_on_right(tmux_context: TmuxContext) {
+fn render_places_clock_after_tmux_on_right(tmux_context: RenderTmuxContext) {
     let project = ProjectName::new("demo");
     let context = RenderContext {
         project: &project,
@@ -151,7 +150,7 @@ fn render_places_clock_after_tmux_on_right(tmux_context: TmuxContext) {
 #[case::bare_name(Some("build"), "session:1.%0@build")]
 #[case::hostile(Some("/tmp/#{pane_id}"), "session:1.%0@##{pane_id}")]
 fn render_tmux_segment_labels_the_socket(
-    mut tmux_context: TmuxContext,
+    mut tmux_context: RenderTmuxContext,
     #[case] socket: Option<&str>,
     #[case] expected: &str,
 ) {
@@ -354,7 +353,7 @@ pub(super) fn render_dynamic(values: &DynamicValues) -> String {
         is_worktree: false,
     };
     let pr = PrNumber::new(values.pr.clone());
-    let tmux = TmuxContext {
+    let tmux = RenderTmuxContext {
         session: Some(values.session.clone()),
         window: Some(values.window.clone()),
         pane: Some(values.pane.clone()),

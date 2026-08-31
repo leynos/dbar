@@ -25,18 +25,8 @@
 
 use std::fmt;
 
+use crate::cache::CacheFailure;
 use crate::types::PrNumber;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// A cache failure expressed without exposing an adapter error type.
-pub enum CacheFailure {
-    /// The cache directory could not be resolved.
-    DirectoryUnavailable,
-    /// Loading a cache entry failed.
-    Read,
-    /// Persisting a cache entry failed.
-    Write,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// A GitHub lookup failure expressed without exposing the client adapter.

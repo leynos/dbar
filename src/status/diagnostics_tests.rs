@@ -5,6 +5,7 @@
 
 use super::tests::{cache_root, failing_runner};
 use super::*;
+use crate::cache::FileCacheStorage;
 use camino::Utf8PathBuf;
 use mockable::DefaultClock;
 use rstest::rstest;
@@ -19,7 +20,13 @@ fn a_status_line_survives_every_probe_failing(cache_root: io::Result<(TempDir, U
         ..StatusArgs::default()
     };
     let clock = DefaultClock;
-    let report = build_status_report(&args, &project_dir, &failing_runner(), &clock)
+    let runner = failing_runner();
+    let dependencies = StatusDependencies {
+        runner: &runner,
+        clock: &clock,
+        cache: &FileCacheStorage,
+    };
+    let report = build_status_report(&args, &project_dir, &dependencies)
         .expect("a failing probe must not fail the command");
 
     // The rendered contract: a project segment and nothing that needs git,

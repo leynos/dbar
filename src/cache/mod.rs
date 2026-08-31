@@ -5,27 +5,26 @@
 //! keep that bounded, expired entries are reclaimed by [`sweep_cache_dir`].
 //!
 //! Reads never delete. [`load_cached_value`] reports expiry as
-//! [`CacheLookup::Expired`] and leaves the file in place; the caller — which
-//! has just learned it must perform a fresh lookup anyway — invokes the sweep
-//! itself, so the deletion is visible at the call site rather than hidden
-//! behind a `load_*` name.
+//! [`CacheLookup::Expired`] and leaves the file in place; the explicit refresh
+//! boundary invokes the sweep itself, so deletion is visible at the call site
+//! rather than hidden behind a `load_*` name.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::ambient_authority;
-use cap_std::fs_utf8::{Dir, OpenOptions};
+use cap_std::fs_utf8::{Dir, File, OpenOptions};
 use directories::ProjectDirs;
 use mockable::Clock;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::status::cache::{CacheReader, CacheWriter, CachedValue};
-use crate::status::pr::CacheFailure;
 use crate::types::CacheTtlSeconds;
 
+mod port;
 mod retention;
 
+pub(crate) use port::{CacheFailure, CacheReader, CacheStorage, CacheWriter, CachedValue};
 pub use retention::sweep_cache_dir;
 
 /// Filesystem-backed implementation of the status cache ports.
@@ -95,6 +94,9 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// stale temp files in the background, so exhausting this budget means
 /// something is wrong with the directory rather than merely unlucky.
 const TEMP_NAME_ATTEMPTS: usize = 4;
+
+/// The stable inode that serializes cache-directory mutations.
+const MUTATION_LOCK_NAME: &str = ".dbar.lock";
 
 #[derive(Debug, Error)]
 /// Errors produced while reading or writing cached data.
@@ -255,6 +257,9 @@ pub fn store_cached_value(
     if let Some(parent) = path.parent() {
         Dir::create_ambient_dir_all(parent, ambient_authority())?;
     }
+    let parent = parent_of(path);
+    let dir = Dir::open_ambient_dir(parent, ambient_authority())?;
+    let _lock = acquire_mutation_lock(&dir)?;
     let entry = CacheEntry {
         value: value.into(),
         updated_at: to_epoch_seconds(clock.utc().timestamp())?,
@@ -262,6 +267,20 @@ pub fn store_cached_value(
     let payload = serde_json::to_string(&entry)?;
     write(path, &payload)?;
     Ok(())
+}
+
+/// Lock `dir` for one cache mutation, releasing it when the returned file drops.
+///
+/// The lock file is retained permanently: unlinking it would allow another
+/// process to lock a new inode while an in-flight sweep still owns the old one.
+pub(super) fn acquire_mutation_lock(dir: &Dir) -> Result<File, CacheError> {
+    use rustix::fs::{FlockOperation, flock};
+
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true);
+    let file = dir.open_with(MUTATION_LOCK_NAME, &options)?;
+    flock(&file, FlockOperation::LockExclusive).map_err(std::io::Error::from)?;
+    Ok(file)
 }
 
 fn read_to_string(path: &Utf8Path) -> Result<String, CacheError> {
@@ -372,6 +391,8 @@ const fn to_epoch_seconds(timestamp: i64) -> Result<u64, CacheError> {
 
 #[cfg(test)]
 mod concurrency_tests;
+#[cfg(test)]
+mod mutation_lock_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

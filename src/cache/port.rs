@@ -1,15 +1,20 @@
-//! Cache ports owned by the status application boundary.
-//!
-//! The status query receives only [`CacheReader`], while the explicit refresh
-//! operation receives [`CacheStorage`]. This keeps a status render unable to
-//! mutate cache state by construction.
+//! Cache ports and adapter-neutral outcomes used by status assembly.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use mockable::Clock;
 
-use super::pr::CacheFailure;
-use crate::config::StatusArgs;
 use crate::types::CacheTtlSeconds;
+
+/// A cache failure expressed without exposing a filesystem adapter error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CacheFailure {
+    /// The cache directory could not be resolved.
+    DirectoryUnavailable,
+    /// Loading or reclaiming cache entries failed.
+    Read,
+    /// Persisting a cache entry failed.
+    Write,
+}
 
 /// A cache value as seen through the status application's read port.
 #[derive(Debug)]
@@ -20,18 +25,6 @@ pub(crate) enum CachedValue {
     Expired,
     /// No entry exists at the requested key.
     Missing,
-}
-
-/// Inputs to the cache read performed while rendering status.
-pub(crate) struct CachedPrRead<'a> {
-    /// Parsed status settings.
-    pub(crate) args: &'a StatusArgs,
-    /// Clock used to evaluate TTL expiry.
-    pub(crate) clock: &'a dyn Clock,
-    /// Directory that scopes the cache key.
-    pub(crate) project_dir: &'a Utf8Path,
-    /// Branch that scopes the cache key.
-    pub(crate) branch: &'a str,
 }
 
 /// Read-only cache operations needed while rendering a status line.

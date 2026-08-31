@@ -1,8 +1,7 @@
 //! Coverage for the retention sweep this boundary performs explicitly.
 //!
-//! `cache::load_cached_value` no longer deletes anything, so the guarantee
-//! that expired entries are still reclaimed — on the same trigger as before —
-//! now rests here, at the call site that decided to go upstream.
+//! `cache::load_cached_value` never deletes anything, so the guarantee that
+//! expired entries are reclaimed rests at the explicit refresh boundary.
 
 use super::tests::{
     BRANCH, PROJECT_DIR, Reply, StubGitHubClient, args_with_cache, cache_root, exists, lookup,
@@ -60,7 +59,7 @@ fn an_expired_read_makes_the_boundary_sweep(cache_root: io::Result<(TempDir, Utf
 }
 
 #[rstest]
-fn a_fresh_read_sweeps_nothing(cache_root: io::Result<(TempDir, Utf8PathBuf)>) {
+fn a_fresh_read_still_sweeps_stale_siblings(cache_root: io::Result<(TempDir, Utf8PathBuf)>) {
     let (_guard, cache_dir) = cache_root.expect("cache root");
     let path = pr_cache_path(&cache_dir, Utf8Path::new(PROJECT_DIR), BRANCH);
     let sibling = cache_dir.join(STALE_SIBLING);
@@ -77,7 +76,24 @@ fn a_fresh_read_sweeps_nothing(cache_root: io::Result<(TempDir, Utf8PathBuf)>) {
         report.cache
     );
     assert!(
-        exists(&sibling),
-        "an ordinary cache hit must not list or reclaim anything"
+        !exists(&sibling),
+        "every explicit refresh must reclaim stale siblings, including a cache hit"
+    );
+}
+
+#[rstest]
+fn a_missing_read_sweeps_stale_siblings(cache_root: io::Result<(TempDir, Utf8PathBuf)>) {
+    let (_guard, cache_dir) = cache_root.expect("cache root");
+    let sibling = cache_dir.join(STALE_SIBLING);
+    write_raw(&sibling, &expired_payload()).expect("seed stale sibling");
+
+    let github = StubGitHubClient::new(Reply::NoPr);
+    let clock = DefaultClock;
+    let report = lookup(&args_with_cache(&cache_dir), &github, &clock);
+
+    assert!(matches!(report.cache, CacheOutcome::Miss));
+    assert!(
+        !exists(&sibling),
+        "a cache miss must run the same bounded retention sweep"
     );
 }

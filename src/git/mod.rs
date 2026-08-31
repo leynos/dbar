@@ -81,6 +81,8 @@ pub enum GitProbe {
     Branch,
     /// `git status --porcelain`.
     WorktreeStatus,
+    /// `git check-attr filter` preflight for the worktree-status probe.
+    FilterPreflight,
     /// `git rev-list --left-right --count @{upstream}...HEAD`.
     UpstreamCounts,
     /// `git remote get-url origin`.
@@ -94,6 +96,7 @@ impl GitProbe {
             Self::Repository => "rev-parse --is-inside-work-tree",
             Self::Branch => "branch --show-current",
             Self::WorktreeStatus => "status --porcelain",
+            Self::FilterPreflight => "check-attr filter",
             Self::UpstreamCounts => "rev-list --left-right --count @{upstream}...HEAD",
             Self::OriginUrl => "remote get-url origin",
         }
@@ -121,6 +124,12 @@ pub enum GitProbeFailure {
     #[error("`{probe}` produced unusable output")]
     MalformedOutput {
         /// The probe whose output could not be parsed.
+        probe: GitProbe,
+    },
+    /// Repository attributes selected an executable filter, so the probe was skipped.
+    #[error("`{probe}` was skipped because repository attributes select a filter")]
+    FilterConfigured {
+        /// The probe protected from the repository-defined filter.
         probe: GitProbe,
     },
 }

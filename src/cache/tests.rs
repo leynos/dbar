@@ -149,7 +149,10 @@ fn entry_names(dir: &Utf8Path) -> Result<Vec<String>, CacheError> {
     let handle = Dir::open_ambient_dir(dir, ambient_authority())?;
     let mut names = Vec::new();
     for entry in handle.entries()? {
-        names.push(entry?.file_name()?);
+        let name = entry?.file_name()?;
+        if name != MUTATION_LOCK_NAME {
+            names.push(name);
+        }
     }
     names.sort();
     Ok(names)

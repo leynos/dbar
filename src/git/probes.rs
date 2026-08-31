@@ -73,6 +73,12 @@ const HARDENING_ARGS: &[&str] = &[
     "core.hooksPath=/dev/null",
 ];
 
+/// The largest number of paths inspected by one `check-attr` invocation.
+///
+/// Keeping the query below a command-line-sized chunk leaves room for long
+/// repository paths while avoiding one process per tracked file.
+const FILTER_ATTRIBUTE_BATCH: usize = 64;
+
 /// Build a hardened `git` command spec rooted at the given project directory.
 ///
 /// See [`HARDENING_ARGS`] for what is disabled and why none of it changes what
@@ -200,6 +206,9 @@ pub(super) fn probe_worktree_status(
     project_dir: &Utf8Path,
 ) -> Probed<(bool, bool)> {
     let probe = GitProbe::WorktreeStatus;
+    if let Err(failure) = guard_against_filter(runner, project_dir) {
+        return Probed::degraded((false, false), failure);
+    }
     let stdout = match run_probe(runner, project_dir, probe, ["status", "--porcelain"]) {
         Ok(value) => value,
         Err(failure) => return Probed::degraded((false, false), failure),
@@ -211,6 +220,52 @@ pub(super) fn probe_worktree_status(
         || Probed::ok(value),
         |_| Probed::degraded(value, GitProbeFailure::MalformedOutput { probe }),
     )
+}
+
+/// Refuse to run `git status` if attributes select a repository-defined filter.
+///
+/// Git applies clean and process filters while refreshing worktree stat data.
+/// Those commands are configured in the repository and are executable code,
+/// so disabling unrelated helpers is insufficient. `check-attr` only resolves
+/// attributes: it does not perform a conversion. We query every tracked path
+/// in bounded batches, then skip the status probe whenever any path selects a
+/// filter. A failed preflight also skips the probe, because running status
+/// without its answer would turn a preflight failure into code execution.
+fn guard_against_filter(
+    runner: &dyn CommandRunner,
+    project_dir: &Utf8Path,
+) -> Result<(), GitProbeFailure> {
+    let probe = GitProbe::FilterPreflight;
+    let tracked_paths = run_probe(runner, project_dir, probe, ["ls-files", "-z"])?;
+    let paths = tracked_paths
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .collect::<Vec<_>>();
+    for batch in paths.chunks(FILTER_ATTRIBUTE_BATCH) {
+        let args = ["check-attr", "-z", "filter", "--"]
+            .into_iter()
+            .map(str::to_owned)
+            .chain(batch.iter().map(|path| (*path).to_owned()));
+        let output = run_probe(runner, project_dir, probe, args)?;
+        if filter_is_selected(&output).map_err(|()| GitProbeFailure::MalformedOutput { probe })? {
+            return Err(GitProbeFailure::FilterConfigured {
+                probe: GitProbe::WorktreeStatus,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Report whether a NUL-delimited `git check-attr -z` response selects a filter.
+fn filter_is_selected(output: &str) -> Result<bool, ()> {
+    let fields = output.split_terminator('\0').collect::<Vec<_>>();
+    let mut records = fields.chunks_exact(3);
+    if !records.remainder().is_empty() {
+        return Err(());
+    }
+    Ok(records.any(
+        |record| matches!(record, [_, "filter", value] if !matches!(*value, "unspecified" | "unset")),
+    ))
 }
 
 /// The dirty and staged flags plus the first unparseable porcelain line.

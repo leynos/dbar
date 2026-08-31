@@ -1,7 +1,6 @@
 //! Rendering logic for tmux status lines.
 
 use crate::git::GitStatus;
-use crate::tmux::TmuxContext;
 use crate::types::{BranchName, PrNumber, ProjectName};
 use unicode_width::UnicodeWidthChar;
 
@@ -33,6 +32,22 @@ const COLOUR_CHIP_DANGER: u8 = 203;
 /// key.
 const DETACHED_LABEL: &str = "detached";
 
+/// Tmux values normalized for presentation.
+///
+/// The renderer owns this small snapshot so rendering does not depend on the
+/// probe adapter that collected it.
+#[derive(Debug, Clone, Default)]
+pub struct RenderTmuxContext {
+    /// Tmux session name.
+    pub session: Option<String>,
+    /// Tmux window index or name.
+    pub window: Option<String>,
+    /// Tmux pane identifier.
+    pub pane: Option<String>,
+    /// Tmux server socket path.
+    pub socket: Option<String>,
+}
+
 /// Borrowed inputs for one status-line render.
 ///
 /// Every field is a snapshot already gathered by the probes: the project name,
@@ -47,7 +62,7 @@ pub struct RenderContext<'a> {
     /// Optional PR number to render.
     pub pr_number: Option<&'a PrNumber>,
     /// Optional tmux metadata for the right segment.
-    pub tmux: Option<&'a TmuxContext>,
+    pub tmux: Option<&'a RenderTmuxContext>,
     /// Optional clock label for the final right segment.
     pub clock: Option<&'a str>,
     /// Optional tmux client width used for right alignment.
@@ -73,7 +88,7 @@ pub struct RenderContext<'a> {
 ///     behind: BehindCount::new(0),
 ///     is_worktree: false,
 /// };
-/// let tmux = TmuxContext {
+/// let tmux = RenderTmuxContext {
 ///     session: Some("work".to_owned()),
 ///     window: Some("1".to_owned()),
 ///     pane: Some("%0".to_owned()),
@@ -255,7 +270,7 @@ fn socket_label(socket: &str) -> Option<&str> {
         .filter(|name| !name.is_empty() && *name != DEFAULT_SOCKET_NAME)
 }
 
-fn render_tmux_segment(context: &TmuxContext) -> Option<String> {
+fn render_tmux_segment(context: &RenderTmuxContext) -> Option<String> {
     let session = context.session.as_ref()?;
     let window = context.window.as_deref().unwrap_or("-");
     let pane = context.pane.as_deref().unwrap_or("-");

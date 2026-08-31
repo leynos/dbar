@@ -32,6 +32,7 @@ pub use crate::error::DbarError;
 
 use std::io::{self, ErrorKind, Write};
 
+use crate::cache::FileCacheStorage;
 use crate::command::RealCommandRunner;
 use crate::config::DbarCommand;
 use crate::github::{GhCliClient, GitHubClient, MockGitHubClient};
@@ -116,8 +117,14 @@ fn run_status(
 ) -> Result<(), DbarError> {
     let runner = RealCommandRunner;
     let clock = DefaultClock;
+    let cache = FileCacheStorage;
     let project_dir = resolve_project_dir(args.project_dir.as_deref(), working_directory)?;
-    let report = status::build_status_report(args, &project_dir, &runner, &clock)?;
+    let dependencies = status::StatusDependencies {
+        runner: &runner,
+        clock: &clock,
+        cache: &cache,
+    };
+    let report = status::build_status_report(args, &project_dir, &dependencies)?;
     let mut stdout = io::stdout();
     write_line(&mut stdout, &report.line)?;
     flush_writer(&mut stdout)?;
@@ -137,6 +144,7 @@ fn run_refresh(
 ) -> Result<(), DbarError> {
     let runner = RealCommandRunner;
     let clock = DefaultClock;
+    let cache = FileCacheStorage;
     let project_dir = resolve_project_dir(args.project_dir.as_deref(), working_directory)?;
     let git = git::git_status(&runner, &project_dir);
     let Some(branch) = git.status().and_then(|status| status.branch.as_ref()) else {
@@ -161,7 +169,7 @@ fn run_refresh(
         clock: &clock,
         github,
     };
-    let report = status::refresh_pr_cache(&request);
+    let report = status::refresh_pr_cache(&request, &cache);
     let diagnostics = refresh_diagnostics(git, Some(report));
     report_diagnostics(
         &mut io::stderr(),

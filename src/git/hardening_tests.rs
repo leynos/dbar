@@ -111,6 +111,16 @@ impl HostileRepo {
         )
     }
 
+    /// Configure an attribute-selected clean filter for the tracked file.
+    fn arm_filter(&self) -> io::Result<()> {
+        write_file(&self.repo, ".gitattributes", "tracked.txt filter=hostile\n")?;
+        let command = self.injected_command();
+        run_git(
+            &self.repo,
+            &["config", "filter.hostile.clean", &format!("{command}; cat")],
+        )
+    }
+
     /// Rewrite the tracked file so its stat information no longer matches the
     /// index, which is what makes the next `git status` refresh and rewrite it.
     ///
@@ -213,4 +223,40 @@ fn probing_does_not_run_a_repositorys_index_hook() {
     let fixture = HostileRepo::new().expect("build the hostile fixture");
     fixture.arm_hooks_path().expect("arm core.hooksPath");
     assert_probe_is_inert!(&fixture, "core.hooksPath");
+}
+
+#[rstest]
+fn probing_skips_a_worktree_status_with_an_executable_filter() {
+    let fixture = HostileRepo::new().expect("build the hostile fixture");
+    fixture.arm_filter().expect("arm the attribute filter");
+
+    let outcome = git_status(&RealCommandRunner, &fixture.repo);
+
+    assert!(
+        !fixture.fired(),
+        "probing ran the filter selected by repository attributes"
+    );
+    let GitStatusOutcome::Available(report) = outcome else {
+        panic!("the safe probes should still produce a git report");
+    };
+    assert!(!report.status.dirty);
+    assert!(!report.status.staged);
+    assert!(
+        report.degradations.iter().any(|failure| matches!(
+            failure,
+            super::GitProbeFailure::FilterConfigured {
+                probe: super::GitProbe::WorktreeStatus,
+            }
+        )),
+        "skipping the unsafe worktree probe must remain diagnosable"
+    );
+
+    let unhardened = CommandSpec::new("git")
+        .args(["status", "--porcelain"])
+        .cwd(fixture.repo.clone());
+    drop(RealCommandRunner.run(&unhardened));
+    assert!(
+        fixture.fired(),
+        "the fixture must still prove that an unhardened status invokes the filter"
+    );
 }
