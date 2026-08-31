@@ -1,9 +1,6 @@
 //! Domain-specific newtypes and shared data structures.
 
 use std::fmt;
-use std::str::FromStr;
-
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A project name derived from git metadata or directory names.
@@ -161,7 +158,7 @@ impl fmt::Display for PrNumber {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Cache time-to-live in seconds.
 pub struct CacheTtlSeconds(u64);
 
@@ -203,22 +200,7 @@ impl fmt::Display for CacheTtlSeconds {
     }
 }
 
-impl FromStr for CacheTtlSeconds {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let parsed = value
-            .parse::<u64>()
-            .map_err(|err| format!("invalid cache ttl: {err}"))?;
-        Ok(Self(parsed))
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
-// Serde uses the same lowercase spellings as `Display` and `FromStr`, and
-// `FromStr` accepts nothing else, so a configuration file, an environment
-// variable, and a command-line flag all take exactly `left` or `right`.
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 /// tmux status line placement for the install snippet.
 pub enum StatusPosition {
     /// Apply the snippet to `status-left`.
@@ -237,21 +219,9 @@ impl fmt::Display for StatusPosition {
     }
 }
 
-impl FromStr for StatusPosition {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "left" => Ok(Self::Left),
-            "right" => Ok(Self::Right),
-            _ => Err(format!("invalid status position: {value}")),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    //! Tests for TTL and status-position parsing, defaults, and display.
+    //! Tests for domain defaults and display values.
     use super::*;
     use rstest::rstest;
 
@@ -261,61 +231,9 @@ mod tests {
     }
 
     #[rstest]
-    #[case("0", 0)]
-    #[case("30", 30)]
-    #[case("18446744073709551615", u64::MAX)]
-    fn cache_ttl_parses_valid_values(#[case] input: &str, #[case] expected: u64) {
-        let ttl: CacheTtlSeconds = input.parse().expect("valid ttl");
-        assert_eq!(ttl.value(), expected);
-    }
-
-    #[rstest]
-    #[case::empty("")]
-    #[case::not_a_number("abc")]
-    #[case::negative("-1")]
-    #[case::fractional("1.5")]
-    #[case::overflow("18446744073709551616")]
-    fn cache_ttl_rejects_invalid_values(#[case] input: &str) {
-        let err = input
-            .parse::<CacheTtlSeconds>()
-            .expect_err("invalid ttl must be rejected");
-        assert!(err.starts_with("invalid cache ttl"), "unexpected: {err}");
-    }
-
-    #[rstest]
     fn cache_ttl_round_trips_through_display() {
         let ttl = CacheTtlSeconds::new(45);
         assert_eq!(ttl.to_string(), "45");
-        assert_eq!(
-            ttl.to_string().parse::<CacheTtlSeconds>().expect("reparse"),
-            ttl
-        );
-    }
-
-    #[rstest]
-    #[case("left", StatusPosition::Left)]
-    #[case("right", StatusPosition::Right)]
-    fn status_position_parses_valid_values(#[case] input: &str, #[case] expected: StatusPosition) {
-        assert_eq!(input.parse::<StatusPosition>().expect("valid"), expected);
-    }
-
-    #[rstest]
-    #[case::empty("")]
-    #[case::unknown("middle")]
-    #[case::upper("LEFT")]
-    // Serde rejects the capitalized spellings, so `FromStr` must too; see
-    // `status_position_rejects_capitalized_serde_values`.
-    #[case::capitalized_left("Left")]
-    #[case::capitalized_right("Right")]
-    #[case::padded(" left")]
-    fn status_position_rejects_invalid_values(#[case] input: &str) {
-        let err = input
-            .parse::<StatusPosition>()
-            .expect_err("invalid position must be rejected");
-        assert!(
-            err.starts_with("invalid status position"),
-            "unexpected: {err}"
-        );
     }
 
     #[rstest]
@@ -326,36 +244,6 @@ mod tests {
         #[case] expected: &str,
     ) {
         assert_eq!(position.to_string(), expected);
-        // Display output must be re-parseable, so the two stay in step.
-        assert_eq!(
-            expected.parse::<StatusPosition>().expect("reparse"),
-            position
-        );
-    }
-
-    #[rstest]
-    #[case(StatusPosition::Left, "\"left\"")]
-    #[case(StatusPosition::Right, "\"right\"")]
-    fn status_position_serializes_in_lowercase(
-        #[case] position: StatusPosition,
-        #[case] expected_json: &str,
-    ) {
-        // Serde must accept the same spellings as the CLI flag and `Display`,
-        // so a configuration file and a command line agree.
-        let json = serde_json::to_string(&position).expect("serialize");
-        assert_eq!(json, expected_json);
-        let parsed: StatusPosition = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(parsed, position);
-        assert_eq!(json.trim_matches('"'), position.to_string());
-    }
-
-    #[rstest]
-    fn status_position_rejects_capitalized_serde_values() {
-        assert!(serde_json::from_str::<StatusPosition>("\"Left\"").is_err());
-        assert!(serde_json::from_str::<StatusPosition>("\"Right\"").is_err());
-        // The command-line and file layers agree on the rejection.
-        assert!("Left".parse::<StatusPosition>().is_err());
-        assert!("Right".parse::<StatusPosition>().is_err());
     }
 
     #[rstest]

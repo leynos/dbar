@@ -1,12 +1,11 @@
 //! GitHub pull request lookup helpers.
 
-use std::fmt;
 use std::time::Duration;
 
 use camino::Utf8Path;
 use thiserror::Error;
 
-use crate::command::{CommandError, CommandRunner, CommandSpec};
+use crate::command::{CommandFailure, CommandRunner, CommandSpec};
 use crate::types::PrNumber;
 
 /// Network probes should fail fast so the tmux status line stays responsive.
@@ -151,74 +150,12 @@ impl GitHubClient for MockGitHubClient {
     }
 }
 
-/// A `gh` failure reduced to the facts that are safe to render.
-///
-/// [`CommandError::NonZero`] carries `gh`'s stderr verbatim, and `gh` prints
-/// authentication diagnostics there — including remote URLs that may embed a
-/// token, as in `https://x-access-token:<token>@github.com/...`. Rather than
-/// wrap the whole [`CommandError`] and rely on every present and future
-/// formatting site choosing `Display` over `Debug`, the stderr is discarded
-/// where the error is built: this type is constructed from the category and
-/// the exit status alone, so there is no secret left in the value for a
-/// `{:?}`, an `unwrap`, or a `source()` walk to expose.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommandFailure {
-    /// The process could not be spawned or read, with the I/O category that
-    /// explains why. The underlying [`std::io::Error`] is dropped because its
-    /// message can name the path it failed on.
-    NotRun(std::io::ErrorKind),
-    /// The process exited with this non-zero status code.
-    ExitStatus(i32),
-    /// The process was terminated by a signal, so it reported no status code.
-    Signalled,
-    /// The process ran past its timeout and was terminated.
-    TimedOut(Duration),
-    /// A stream exceeded its byte ceiling and the process was terminated.
-    OutputTooLarge {
-        /// The configured byte ceiling that was exceeded.
-        limit: usize,
-        /// Which stream exceeded the ceiling.
-        stream: &'static str,
-    },
-}
-
-impl From<&CommandError> for CommandFailure {
-    fn from(error: &CommandError) -> Self {
-        match error {
-            CommandError::Io(io_error) => Self::NotRun(io_error.kind()),
-            CommandError::NonZero {
-                status: Some(code), ..
-            } => Self::ExitStatus(*code),
-            CommandError::NonZero { status: None, .. } => Self::Signalled,
-            CommandError::Timeout { timeout } => Self::TimedOut(*timeout),
-            CommandError::OutputTooLarge { limit, stream } => Self::OutputTooLarge {
-                limit: *limit,
-                stream,
-            },
-        }
-    }
-}
-
-impl fmt::Display for CommandFailure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NotRun(kind) => write!(f, "the process could not be run ({kind})"),
-            Self::ExitStatus(code) => write!(f, "exit status {code}"),
-            Self::Signalled => f.write_str("terminated by a signal"),
-            Self::TimedOut(timeout) => write!(f, "timed out after {timeout:?}"),
-            Self::OutputTooLarge { limit, stream } => {
-                write!(f, "{stream} exceeded the {limit}-byte output limit")
-            }
-        }
-    }
-}
-
 /// Errors returned by GitHub client implementations.
 ///
 /// Deliberately carries no `source`: the only thing worth reporting about a
 /// failed `gh` invocation is its [`CommandFailure`] category, and chaining the
-/// original [`CommandError`] would put its captured stderr back within reach
-/// of `Debug` and [`std::error::Error::source`].
+/// original [`crate::command::CommandError`] would put repository-controlled
+/// failure text back within reach of `Debug` and [`std::error::Error::source`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum GitHubError {
     /// The `gh` CLI command failed.

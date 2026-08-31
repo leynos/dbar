@@ -44,7 +44,7 @@ fn the_configuration_file_overrides_the_documented_defaults() -> Result<(), Fixt
     // The documented defaults are `left` and the home directory's `.tmux.conf`;
     // both differ from the file's values, so the file must be what won.
     let args = install_of(load_command_from(["dbar", "install"]).expect("install parses"));
-    assert_eq!(args.position, Some(StatusPosition::Right));
+    assert_eq!(args.position.map(Into::into), Some(StatusPosition::Right));
     assert_eq!(
         args.path.as_deref().map(camino::Utf8Path::as_str),
         Some("/tmp/from-file.tmux.conf")
@@ -117,7 +117,7 @@ fn install_environment_values_apply_when_the_command_line_is_silent() {
     ]);
 
     let args = install_of(load_command_from(["dbar", "install"]).expect("install parses"));
-    assert_eq!(args.position, Some(StatusPosition::Right));
+    assert_eq!(args.position.map(Into::into), Some(StatusPosition::Right));
     assert_eq!(
         args.path.as_deref().map(camino::Utf8Path::as_str),
         Some("/tmp/from-env.tmux.conf")
@@ -138,7 +138,7 @@ fn install_configuration_file_values_are_loaded() -> Result<(), FixtureError> {
     let _env = EnvGuard::set(&ISOLATING).and(&[("HOME", file.home.as_str())]);
 
     let args = install_of(load_command_from(["dbar", "install"]).expect("install parses"));
-    assert_eq!(args.position, Some(StatusPosition::Right));
+    assert_eq!(args.position.map(Into::into), Some(StatusPosition::Right));
     assert_eq!(
         args.path.as_deref().map(camino::Utf8Path::as_str),
         Some("/tmp/from-file.tmux.conf")

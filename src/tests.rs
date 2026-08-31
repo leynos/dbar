@@ -1,8 +1,11 @@
 //! Tests for the crate's run boundary, where ambient inputs are resolved.
 
 use super::*;
+use crate::command::CommandFailure;
+use crate::git::{GitProbe, GitProbeFailure, GitStatus, GitStatusOutcome, GitStatusReport};
 use crate::status::StatusDiagnostics;
 use crate::tmux::{TmuxField, TmuxProbeFailure};
+use crate::types::{AheadCount, BehindCount};
 use mockable::MockEnv;
 use rstest::rstest;
 
@@ -104,6 +107,32 @@ fn report_diagnostics_writes_only_when_enabled() {
         expected.push('\n');
     }
     assert_eq!(text, expected);
+}
+
+#[test]
+fn refresh_reports_a_failed_branch_probe_when_diagnostics_are_enabled() {
+    let diagnostics = refresh_diagnostics(
+        GitStatusOutcome::Available(GitStatusReport {
+            status: GitStatus {
+                branch: None,
+                dirty: false,
+                staged: false,
+                ahead: AheadCount::new(0),
+                behind: BehindCount::new(0),
+                is_worktree: false,
+            },
+            degradations: vec![GitProbeFailure::CommandFailed {
+                probe: GitProbe::Branch,
+                failure: CommandFailure::ExitStatus(1),
+            }],
+        }),
+        None,
+    );
+    let mut output = Vec::new();
+    report_diagnostics(&mut output, &diagnostics, true).expect("buffered write cannot fail");
+    let rendered = String::from_utf8(output).expect("diagnostics are utf8");
+    assert!(rendered.contains("branch --show-current"));
+    assert!(rendered.contains("exit status 1"));
 }
 
 /// An outcome with the given flags and a fixed path and snippet.

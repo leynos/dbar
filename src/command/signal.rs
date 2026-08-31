@@ -57,7 +57,7 @@ pub(super) enum Signaller {
 }
 
 /// How much of the claim is left to spend.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ClaimState {
     /// Nothing has signalled yet; whoever claims first may.
     Unsignalled,
@@ -169,5 +169,55 @@ impl SignalClaim {
                 }
             };
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Exhaustive transition tests for process-group signalling claims.
+
+    use super::{ClaimState, SignalClaim, Signaller};
+    use rstest::rstest;
+
+    #[rstest]
+    #[case::unsignalled_reader(
+        ClaimState::Unsignalled,
+        Signaller::Reader,
+        Some(ClaimState::Signalled)
+    )]
+    #[case::unsignalled_session(
+        ClaimState::Unsignalled,
+        Signaller::Session,
+        Some(ClaimState::Signalled)
+    )]
+    #[case::signalled_reader(ClaimState::Signalled, Signaller::Reader, None)]
+    #[case::signalled_session(ClaimState::Signalled, Signaller::Session, None)]
+    #[case::reaped_reader(ClaimState::Reaped, Signaller::Reader, None)]
+    #[case::reaped_session(ClaimState::Reaped, Signaller::Session, Some(ClaimState::Sealed))]
+    #[case::sealed_reader(ClaimState::Sealed, Signaller::Reader, None)]
+    #[case::sealed_session(ClaimState::Sealed, Signaller::Session, None)]
+    fn next_state_exhaustively_limits_each_signaller(
+        #[case] state: ClaimState,
+        #[case] signaller: Signaller,
+        #[case] expected: Option<ClaimState>,
+    ) {
+        assert_eq!(SignalClaim::next_state(state, signaller), expected);
+    }
+
+    #[rstest]
+    #[case::unsignalled(ClaimState::Unsignalled, ClaimState::Reaped)]
+    #[case::signalled(ClaimState::Signalled, ClaimState::Sealed)]
+    #[case::reaped(ClaimState::Reaped, ClaimState::Sealed)]
+    #[case::sealed(ClaimState::Sealed, ClaimState::Sealed)]
+    fn mark_reaped_leaves_only_the_session_claim_when_permitted(
+        #[case] initial: ClaimState,
+        #[case] expected: ClaimState,
+    ) {
+        let claim = SignalClaim::new(1);
+        claim.with_state(|state| *state = initial);
+        claim.mark_reaped();
+        let actual = claim.with_state(|state| *state);
+        assert_eq!(actual, expected);
+        assert!(SignalClaim::next_state(actual, Signaller::Reader).is_none());
     }
 }

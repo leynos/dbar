@@ -29,6 +29,7 @@ compile_error!(
      would silently drop a guarantee the code claims to provide"
 );
 
+use std::fmt;
 use std::process::Command;
 use std::time::Duration;
 
@@ -152,12 +153,10 @@ pub enum CommandError {
     #[error("failed to execute command")]
     Io(#[from] std::io::Error),
     /// The process exited with a non-zero status.
-    #[error("command exited with status {status:?}: {stderr}")]
+    #[error("command exited with status {status:?}")]
     NonZero {
         /// The exit status code, if available.
         status: Option<i32>,
-        /// Collected stderr output.
-        stderr: String,
     },
     /// The process ran longer than its timeout and was terminated.
     #[error("command timed out after {timeout:?}")]
@@ -173,6 +172,58 @@ pub enum CommandError {
         /// Which stream exceeded the ceiling.
         stream: &'static str,
     },
+}
+
+/// A command failure reduced to facts that are safe to expose in diagnostics.
+///
+/// This intentionally excludes command stderr and I/O messages. Both can
+/// contain repository-controlled values, credentials, or filesystem paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandFailure {
+    /// The process could not be started or read, identified only by I/O kind.
+    NotRun(std::io::ErrorKind),
+    /// The process exited with a non-zero status code.
+    ExitStatus(i32),
+    /// The process was terminated by a signal.
+    Signalled,
+    /// The process ran beyond its timeout.
+    TimedOut(Duration),
+    /// A stream exceeded its configured byte limit.
+    OutputTooLarge {
+        /// The configured byte limit.
+        limit: usize,
+        /// The stream that exceeded the limit.
+        stream: &'static str,
+    },
+}
+
+impl From<&CommandError> for CommandFailure {
+    fn from(error: &CommandError) -> Self {
+        match error {
+            CommandError::Io(io_error) => Self::NotRun(io_error.kind()),
+            CommandError::NonZero { status: Some(code) } => Self::ExitStatus(*code),
+            CommandError::NonZero { status: None } => Self::Signalled,
+            CommandError::Timeout { timeout } => Self::TimedOut(*timeout),
+            CommandError::OutputTooLarge { limit, stream } => Self::OutputTooLarge {
+                limit: *limit,
+                stream,
+            },
+        }
+    }
+}
+
+impl fmt::Display for CommandFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotRun(kind) => write!(f, "the process could not be run ({kind})"),
+            Self::ExitStatus(code) => write!(f, "exit status {code}"),
+            Self::Signalled => f.write_str("terminated by a signal"),
+            Self::TimedOut(timeout) => write!(f, "timed out after {timeout:?}"),
+            Self::OutputTooLarge { limit, stream } => {
+                write!(f, "{stream} exceeded the {limit}-byte output limit")
+            }
+        }
+    }
 }
 
 /// Executes external commands for probes.
@@ -237,12 +288,10 @@ impl CommandRunner for RealCommandRunner {
         // rather than anything the command decided; report the size violation
         // before consulting the status at all.
         let stdout_bytes = require_within_limit(stdout_outcome, max_output, "stdout")?;
-        let stderr_bytes = require_within_limit(stderr_outcome, max_output, "stderr")?;
+        require_within_limit(stderr_outcome, max_output, "stderr")?;
         if !status.success() {
-            let stderr = String::from_utf8_lossy(&stderr_bytes).trim().to_owned();
             return Err(CommandError::NonZero {
                 status: status.code(),
-                stderr,
             });
         }
         let stdout = String::from_utf8_lossy(&stdout_bytes).trim().to_owned();

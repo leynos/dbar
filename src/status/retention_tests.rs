@@ -9,6 +9,7 @@ use super::tests::{
     rendered, write_raw,
 };
 use super::*;
+use crate::cache;
 use camino::Utf8Path;
 use mockable::DefaultClock;
 use rstest::rstest;

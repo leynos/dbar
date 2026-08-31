@@ -7,7 +7,7 @@
 use camino::Utf8Path;
 
 use super::{GitProbe, GitProbeFailure};
-use crate::command::{CommandError, CommandRunner, CommandSpec};
+use crate::command::{CommandFailure, CommandRunner, CommandSpec};
 use crate::types::{AheadCount, BehindCount, BranchName, ProjectName};
 
 /// A probed value paired with the failure, if any, that forced its fallback.
@@ -101,7 +101,10 @@ fn run_probe(
     runner
         .run(&spec)
         .map(|output| output.stdout)
-        .map_err(|source| GitProbeFailure::CommandFailed { probe, source })
+        .map_err(|source| GitProbeFailure::CommandFailed {
+            probe,
+            failure: CommandFailure::from(&source),
+        })
 }
 
 /// Ask git whether `project_dir` is inside a work tree.
@@ -160,7 +163,7 @@ pub(super) fn probe_origin_name(
     let stdout = match run_probe(runner, project_dir, probe, ["remote", "get-url", "origin"]) {
         Ok(value) => value,
         Err(GitProbeFailure::CommandFailed {
-            source: CommandError::NonZero { .. },
+            failure: CommandFailure::ExitStatus(_),
             ..
         }) => return Probed::ok(None),
         Err(failure) => return Probed::degraded(None, failure),

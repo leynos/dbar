@@ -35,7 +35,7 @@ use std::fmt;
 use camino::Utf8Path;
 use thiserror::Error;
 
-use crate::command::{CommandError, CommandRunner};
+use crate::command::{CommandFailure, CommandRunner};
 use crate::types::{AheadCount, BehindCount, BranchName, ProjectName};
 
 mod probes;
@@ -110,12 +110,12 @@ impl fmt::Display for GitProbe {
 /// Why a `git` probe did not yield usable data.
 pub enum GitProbeFailure {
     /// The probe could not be run, timed out, or exited non-zero.
-    #[error("`{probe}` failed: {source}")]
+    #[error("`{probe}` failed: {failure}")]
     CommandFailed {
         /// The probe that failed.
         probe: GitProbe,
         /// The underlying command failure.
-        source: CommandError,
+        failure: CommandFailure,
     },
     /// The probe ran but produced output this module cannot parse.
     #[error("`{probe}` produced unusable output")]

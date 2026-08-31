@@ -50,10 +50,7 @@ fn field_formats_match_their_hand_written_literals(#[case] field: TmuxField) {
 
 /// The failure a query gets when tmux cannot answer it.
 fn query_failure() -> CommandError {
-    CommandError::NonZero {
-        status: Some(1),
-        stderr: String::new(),
-    }
+    CommandError::NonZero { status: Some(1) }
 }
 
 /// The canned `display-message` answers for the four tmux fields; a `None`
@@ -143,7 +140,22 @@ fn resolve_context_fills_missing_fields() {
 
 #[rstest]
 fn resolve_context_preserves_prepopulated_fields() {
-    let runner = Answers::with_fields("other", "9", "%9", "/tmp/other").build();
+    let mut runner = MockCommandRunner::new();
+    for (field, stdout) in [
+        (TmuxField::Window, "9"),
+        (TmuxField::Pane, "%9"),
+        (TmuxField::Socket, "/tmp/other"),
+    ] {
+        runner
+            .expect_run()
+            .with(eq(expected_spec(field)))
+            .times(1)
+            .returning(move |_| {
+                Ok(CommandOutput {
+                    stdout: stdout.to_owned(),
+                })
+            });
+    }
     let context = TmuxContext {
         session: Some("mine".to_owned()),
         ..TmuxContext::default()

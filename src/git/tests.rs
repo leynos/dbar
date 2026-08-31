@@ -61,17 +61,13 @@ impl Answers {
         let outputs = self.outputs;
         let mut runner = MockCommandRunner::new();
         runner.expect_run().returning(move |spec| {
-            outputs.get(spec).map_or(
-                Err(CommandError::NonZero {
-                    status: Some(1),
-                    stderr: String::new(),
-                }),
-                |stdout| {
+            outputs
+                .get(spec)
+                .map_or(Err(CommandError::NonZero { status: Some(1) }), |stdout| {
                     Ok(CommandOutput {
                         stdout: stdout.clone(),
                     })
-                },
-            )
+                })
         });
         runner
     }

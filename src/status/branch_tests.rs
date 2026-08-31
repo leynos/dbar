@@ -9,8 +9,12 @@ use std::collections::HashMap;
 use camino::{Utf8Path, Utf8PathBuf};
 use mockable::DefaultClock;
 use rstest::rstest;
+use tempfile::TempDir;
 
 use super::build_status_report;
+use super::pr_cache_path;
+use super::tests::{args_with_cache, exists, utf8_path};
+use crate::cache;
 use crate::command::{CommandError, CommandOutput, CommandSpec, MockCommandRunner};
 use crate::config::StatusArgs;
 use crate::git::git_command;
@@ -52,11 +56,42 @@ fn detached_head_runner() -> MockCommandRunner {
 
     let mut runner = MockCommandRunner::new();
     runner.expect_run().returning(move |spec| {
-        answers.get(spec).map_or(
-            Err(CommandError::NonZero {
-                status: Some(1),
-                stderr: String::new(),
-            }),
+        answers
+            .get(spec)
+            .map_or(Err(CommandError::NonZero { status: Some(1) }), |stdout| {
+                Ok(CommandOutput {
+                    stdout: stdout.clone(),
+                })
+            })
+    });
+    runner
+}
+
+/// A healthy repository with a named branch and an origin-derived project.
+fn named_branch_runner() -> MockCommandRunner {
+    let answers: HashMap<CommandSpec, String> = [
+        (git_spec(&["rev-parse", "--is-inside-work-tree"]), "true"),
+        (
+            git_spec(&["branch", "--show-current"]),
+            "feature/cache-only",
+        ),
+        (git_spec(&["status", "--porcelain"]), ""),
+        (
+            git_spec(&["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]),
+            "0\t0",
+        ),
+        (
+            git_spec(&["remote", "get-url", "origin"]),
+            "https://github.com/acme/demo.git",
+        ),
+    ]
+    .into_iter()
+    .map(|(spec, stdout)| (spec, stdout.to_owned()))
+    .collect();
+    let mut runner = MockCommandRunner::new();
+    runner.expect_run().returning(move |spec| {
+        answers.get(spec).map_or_else(
+            || Err(CommandError::NonZero { status: Some(1) }),
             |stdout| {
                 Ok(CommandOutput {
                     stdout: stdout.clone(),
@@ -65,6 +100,17 @@ fn detached_head_runner() -> MockCommandRunner {
         )
     });
     runner
+}
+
+/// Complete tmux inputs avoid a live fallback while exercising status assembly.
+fn status_args(cache_dir: &Utf8Path) -> StatusArgs {
+    StatusArgs {
+        session: Some("demo".to_owned()),
+        window: Some("1".to_owned()),
+        pane: Some("%0".to_owned()),
+        socket: Some("/tmp/tmux.sock".to_owned()),
+        ..args_with_cache(cache_dir)
+    }
 }
 
 #[rstest]
@@ -91,4 +137,58 @@ fn a_detached_head_renders_the_label_without_looking_up_a_pr() {
     assert!(report.diagnostics.pr.is_none());
     // A detached HEAD is an ordinary state, so no git probe is diagnosed.
     assert!(report.diagnostics.git.is_empty());
+}
+
+#[rstest]
+fn status_cache_miss_is_read_only() {
+    let cache_root = TempDir::new().expect("temporary cache root");
+    let cache_dir = utf8_path(&cache_root).expect("UTF-8 cache path");
+    let args = status_args(&cache_dir);
+    let clock = DefaultClock;
+    let report = build_status_report(
+        &args,
+        Utf8Path::new(PROJECT_DIR),
+        &named_branch_runner(),
+        &clock,
+    )
+    .expect("healthy status assembly");
+
+    let cache_path = pr_cache_path(&cache_dir, Utf8Path::new(PROJECT_DIR), "feature/cache-only");
+    assert!(
+        report
+            .diagnostics
+            .pr
+            .as_ref()
+            .is_some_and(|pr| pr.pr_number.is_none())
+    );
+    assert!(!exists(&cache_path), "status must not write a cache miss");
+}
+
+#[rstest]
+fn status_reads_a_preseeded_cache_entry_without_refreshing_it() {
+    let cache_root = TempDir::new().expect("temporary cache root");
+    let cache_dir = utf8_path(&cache_root).expect("UTF-8 cache path");
+    let cache_path = pr_cache_path(&cache_dir, Utf8Path::new(PROJECT_DIR), "feature/cache-only");
+    let clock = DefaultClock;
+    cache::store_cached_value(&cache_path, &clock, "42").expect("seed cache");
+
+    let report = build_status_report(
+        &status_args(&cache_dir),
+        Utf8Path::new(PROJECT_DIR),
+        &named_branch_runner(),
+        &clock,
+    )
+    .expect("healthy status assembly");
+
+    assert_eq!(
+        report
+            .diagnostics
+            .pr
+            .as_ref()
+            .and_then(|pr| pr.pr_number.as_ref())
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("42")
+    );
+    assert!(exists(&cache_path), "status must retain the seeded entry");
 }

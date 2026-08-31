@@ -6,8 +6,11 @@
 //! and shares the stubs and helpers below.
 
 use super::*;
+use crate::cache::{self, FileCacheStorage};
+use crate::command::CommandFailure;
 use crate::command::{CommandError, MockCommandRunner};
-use crate::github::{CommandFailure, GitHubError};
+use crate::config::ConfigCacheTtlSeconds;
+use crate::github::GitHubError;
 use crate::types::{CacheTtlSeconds, PrNumber};
 use camino::Utf8Path;
 use mockable::DefaultClock;
@@ -64,12 +67,10 @@ impl GitHubClient for StubGitHubClient {
 /// status line assembled without running anything must not pass.
 pub(super) fn failing_runner() -> MockCommandRunner {
     let mut runner = MockCommandRunner::new();
-    runner.expect_run().times(1..).returning(|_| {
-        Err(CommandError::NonZero {
-            status: Some(1),
-            stderr: String::new(),
-        })
-    });
+    runner
+        .expect_run()
+        .times(1..)
+        .returning(|_| Err(CommandError::NonZero { status: Some(1) }));
     runner
 }
 
@@ -95,7 +96,7 @@ pub(super) fn cache_root() -> io::Result<(TempDir, Utf8PathBuf)> {
 pub(super) fn args_with_cache(cache_dir: &Utf8Path) -> StatusArgs {
     StatusArgs {
         cache_dir: Some(cache_dir.to_path_buf()),
-        pr_cache_ttl_seconds: Some(CacheTtlSeconds::new(60)),
+        pr_cache_ttl_seconds: Some(ConfigCacheTtlSeconds::new(60)),
         ..StatusArgs::default()
     }
 }
@@ -134,14 +135,17 @@ pub(super) fn lookup(
     github: &dyn GitHubClient,
     clock: &dyn Clock,
 ) -> PrLookupReport {
-    resolve_pr_number(&PrLookup {
-        cache_dir: args.cache_dir.clone(),
-        ttl: args.pr_cache_ttl_or_default(),
-        clock,
-        github,
-        project_dir: Utf8Path::new(PROJECT_DIR),
-        branch: BRANCH,
-    })
+    resolve_pr_number(
+        &PrLookup {
+            cache_dir: args.cache_dir.clone(),
+            ttl: args.pr_cache_ttl_or_default(),
+            clock,
+            github,
+            project_dir: Utf8Path::new(PROJECT_DIR),
+            branch: BRANCH,
+        },
+        &FileCacheStorage,
+    )
 }
 
 /// Render a report's PR number for comparison.
@@ -292,6 +296,7 @@ fn an_unavailable_cache_directory_skips_every_cache_access() {
             branch: BRANCH,
         },
         CacheOutcome::DirUnavailable(CacheFailure::DirectoryUnavailable),
+        &FileCacheStorage,
     );
 
     assert_eq!(rendered(&report).as_deref(), Some("42"));
@@ -333,8 +338,26 @@ fn a_failed_cache_write_is_reported(cache_root: io::Result<(TempDir, Utf8PathBuf
         &context,
         Some(&path),
         PersistRequest::Store("42".to_owned()),
+        &FileCacheStorage,
     );
-    assert!(matches!(outcome, CacheWriteOutcome::Failed(_)));
+    assert!(matches!(
+        outcome,
+        CacheWriteOutcome::Failed(CacheFailure::Write)
+    ));
+}
+
+#[rstest]
+fn a_cache_io_failure_while_loading_is_classified_as_a_read(
+    cache_root: io::Result<(TempDir, Utf8PathBuf)>,
+) {
+    let (_guard, cache_dir) = cache_root.expect("cache root");
+    let blocker = cache_dir.join("not-a-directory");
+    write_raw(&blocker, "blocker").expect("write cache blocker");
+    let path = blocker.join("entry.json");
+    let clock = DefaultClock;
+    let failure = CacheReader::load(&FileCacheStorage, &path, &clock, CacheTtlSeconds::new(60))
+        .expect_err("a missing cache parent cannot be opened");
+    assert_eq!(failure, CacheFailure::Read);
 }
 
 #[rstest]
@@ -355,6 +378,7 @@ fn a_skipped_write_records_its_reason() {
         &context,
         None,
         PersistRequest::Skip(PersistSkipReason::ServedFromCache),
+        &FileCacheStorage,
     );
     assert!(matches!(
         skipped,
@@ -362,7 +386,12 @@ fn a_skipped_write_records_its_reason() {
     ));
 
     // A store request with nowhere to store it is a skip, not a failure.
-    let nowhere = persist(&context, None, PersistRequest::Store("42".to_owned()));
+    let nowhere = persist(
+        &context,
+        None,
+        PersistRequest::Store("42".to_owned()),
+        &FileCacheStorage,
+    );
     assert!(matches!(
         nowhere,
         CacheWriteOutcome::Skipped(PersistSkipReason::CacheUnavailable)

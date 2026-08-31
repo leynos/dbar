@@ -47,7 +47,8 @@ fn command_line_values_are_applied() {
     assert_eq!(args.session.as_deref(), Some("demo"));
     assert_eq!(args.clock_format.as_deref(), Some("%H"));
     assert_eq!(
-        args.pr_cache_ttl_seconds.map(CacheTtlSeconds::value),
+        args.pr_cache_ttl_seconds
+            .map(|value| CacheTtlSeconds::from(value).value()),
         Some(5)
     );
     assert_eq!(args.show_pr, Some(false));
@@ -62,7 +63,7 @@ fn install_arguments_are_applied() {
     let DbarCommand::Install(args) = command else {
         panic!("expected the install subcommand");
     };
-    assert_eq!(args.position, Some(StatusPosition::Right));
+    assert_eq!(args.position.map(Into::into), Some(StatusPosition::Right));
     assert_eq!(args.full, Some(true));
     // The flag that was *not* typed must stay absent rather than arriving as
     // `Some(false)`, which is what would shadow the lower layers.

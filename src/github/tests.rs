@@ -1,6 +1,6 @@
 //! Tests for `gh` PR parsing, failure propagation, and the mock client.
 use super::*;
-use crate::command::{CommandError, CommandOutput, MockCommandRunner};
+use crate::command::{CommandError, CommandFailure, CommandOutput, MockCommandRunner};
 use mockall::predicate::eq;
 use rstest::rstest;
 
@@ -75,8 +75,7 @@ fn pr_number_reports_no_pr_for_empty_output(#[case] stdout: &str) {
     assert!(pr.is_none(), "empty gh output means no open PR");
 }
 
-/// A realistic `gh` failure: it echoes the remote URL, and the credential
-/// helper's URL embeds the token that authenticated the push.
+/// A realistic I/O failure can name a credential-bearing remote URL.
 const LEAKY_STDERR: &str = "fatal: could not read from remote repository \
      https://x-access-token:ghp_supersecret0123456789@github.com/acme/widgets.git";
 
@@ -124,19 +123,17 @@ fn pr_number_reduces_a_command_failure_to_its_category() {
         .expect_run()
         .with(eq(expected_spec(Utf8Path::new(PROJECT_DIR), "main")))
         .times(1)
-        .returning(|_| {
-            Err(CommandError::NonZero {
-                status: Some(1),
-                stderr: LEAKY_STDERR.to_owned(),
-            })
-        });
+        .returning(|_| Err(CommandError::Io(std::io::Error::other(LEAKY_STDERR))));
     let client = GhCliClient::new(&runner);
     let err = client
         .pr_number(Utf8Path::new(PROJECT_DIR), "main")
         .expect_err("command failure must propagate");
     // The failure still reaches the caller, but as a category and a status
     // rather than as the child's stderr.
-    assert_eq!(err, GitHubError::Command(CommandFailure::ExitStatus(1)));
+    assert_eq!(
+        err,
+        GitHubError::Command(CommandFailure::NotRun(std::io::ErrorKind::Other))
+    );
     let leaks = token_shaped_renderings(&err);
     assert!(
         leaks.is_empty(),
@@ -179,12 +176,12 @@ fn pr_number_builds_the_expected_command_spec(#[case] branch: &str) {
     "GitHub CLI command failed: the process could not be run (entity not found)",
 )]
 #[case::non_zero(
-    CommandError::NonZero { status: Some(1), stderr: LEAKY_STDERR.to_owned() },
+    CommandError::NonZero { status: Some(1) },
     CommandFailure::ExitStatus(1),
     "GitHub CLI command failed: exit status 1",
 )]
 #[case::signalled(
-    CommandError::NonZero { status: None, stderr: LEAKY_STDERR.to_owned() },
+    CommandError::NonZero { status: None },
     CommandFailure::Signalled,
     "GitHub CLI command failed: terminated by a signal",
 )]

@@ -37,9 +37,69 @@ use directories::BaseDirs;
 use ortho_config::OrthoConfig;
 use ortho_config::SubcmdConfigMerge;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::types::{CacheTtlSeconds, StatusPosition};
+
+/// Configuration-layer representation of a cache TTL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ConfigCacheTtlSeconds(u64);
+
+impl ConfigCacheTtlSeconds {
+    /// Create a configuration-layer TTL from an already parsed value.
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl FromStr for ConfigCacheTtlSeconds {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        value
+            .parse()
+            .map(Self::new)
+            .map_err(|error| format!("invalid cache ttl: {error}"))
+    }
+}
+
+impl From<ConfigCacheTtlSeconds> for CacheTtlSeconds {
+    fn from(value: ConfigCacheTtlSeconds) -> Self {
+        Self::new(value.0)
+    }
+}
+
+/// Configuration-layer representation of the tmux status placement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConfigStatusPosition {
+    /// Write the left tmux status segment.
+    Left,
+    /// Write the right tmux status segment.
+    Right,
+}
+
+impl FromStr for ConfigStatusPosition {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "left" => Ok(Self::Left),
+            "right" => Ok(Self::Right),
+            _ => Err(format!("invalid status position: {value}")),
+        }
+    }
+}
+
+impl From<ConfigStatusPosition> for StatusPosition {
+    fn from(value: ConfigStatusPosition) -> Self {
+        match value {
+            ConfigStatusPosition::Left => Self::Left,
+            ConfigStatusPosition::Right => Self::Right,
+        }
+    }
+}
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -106,7 +166,7 @@ pub struct StatusArgs {
     // Optional for the same reason as `clock_format`; consumers fall back to
     // `CacheTtlSeconds::default`.
     #[arg(long)]
-    pub pr_cache_ttl_seconds: Option<CacheTtlSeconds>,
+    pub pr_cache_ttl_seconds: Option<ConfigCacheTtlSeconds>,
     /// Override the cache directory used for PR lookups.
     #[arg(long)]
     pub cache_dir: Option<Utf8PathBuf>,
@@ -139,7 +199,9 @@ impl StatusArgs {
     /// ```
     #[must_use]
     pub fn pr_cache_ttl_or_default(&self) -> CacheTtlSeconds {
-        self.pr_cache_ttl_seconds.unwrap_or_default()
+        self.pr_cache_ttl_seconds
+            .map(Into::into)
+            .unwrap_or_default()
     }
 }
 
@@ -156,7 +218,7 @@ pub struct RefreshArgs {
     pub github_mock_pr: Option<String>,
     /// Cache TTL for PR lookups, in seconds.
     #[arg(long)]
-    pub pr_cache_ttl_seconds: Option<CacheTtlSeconds>,
+    pub pr_cache_ttl_seconds: Option<ConfigCacheTtlSeconds>,
     /// Override the cache directory used for PR lookups.
     #[arg(long)]
     pub cache_dir: Option<Utf8PathBuf>,
@@ -170,7 +232,9 @@ impl RefreshArgs {
     /// one.
     #[must_use]
     pub fn pr_cache_ttl_or_default(&self) -> CacheTtlSeconds {
-        self.pr_cache_ttl_seconds.unwrap_or_default()
+        self.pr_cache_ttl_seconds
+            .map(Into::into)
+            .unwrap_or_default()
     }
 }
 
@@ -196,7 +260,7 @@ pub struct InstallArgs {
     /// Where to install the status segment (left or right).
     // Defaulted after merging, as for `path`.
     #[arg(long)]
-    pub position: Option<StatusPosition>,
+    pub position: Option<ConfigStatusPosition>,
 }
 
 impl InstallArgs {

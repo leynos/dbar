@@ -20,11 +20,67 @@ use mockable::Clock;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::status::cache::{CacheReader, CacheWriter, CachedValue};
+use crate::status::pr::CacheFailure;
 use crate::types::CacheTtlSeconds;
 
 mod retention;
 
 pub use retention::sweep_cache_dir;
+
+/// Filesystem-backed implementation of the status cache ports.
+pub(crate) struct FileCacheStorage;
+
+impl CacheReader for FileCacheStorage {
+    fn resolve_dir(&self, override_dir: Option<Utf8PathBuf>) -> Result<Utf8PathBuf, CacheFailure> {
+        resolve_cache_dir(override_dir).map_err(directory_failure)
+    }
+
+    fn load(
+        &self,
+        path: &Utf8Path,
+        clock: &dyn Clock,
+        ttl: CacheTtlSeconds,
+    ) -> Result<CachedValue, CacheFailure> {
+        load_cached_value(path, clock, ttl)
+            .map(|lookup| match lookup {
+                CacheLookup::Fresh(cached) => CachedValue::Fresh(cached),
+                CacheLookup::Expired => CachedValue::Expired,
+                CacheLookup::Missing => CachedValue::Missing,
+            })
+            .map_err(read_failure)
+    }
+}
+
+impl CacheWriter for FileCacheStorage {
+    fn sweep(
+        &self,
+        dir: &Utf8Path,
+        clock: &dyn Clock,
+        ttl: CacheTtlSeconds,
+    ) -> Result<(), CacheFailure> {
+        sweep_cache_dir(dir, clock, ttl).map_err(read_failure)
+    }
+
+    fn store(&self, path: &Utf8Path, clock: &dyn Clock, value: String) -> Result<(), CacheFailure> {
+        store_cached_value(path, clock, value).map_err(write_failure)
+    }
+}
+
+/// Classify cache-directory resolution without retaining adapter errors.
+fn directory_failure(_error: CacheError) -> CacheFailure {
+    CacheFailure::DirectoryUnavailable
+}
+
+/// Classify every failed cache read and retention sweep as a read failure.
+fn read_failure(_error: CacheError) -> CacheFailure {
+    CacheFailure::Read
+}
+
+/// Classify every failed cache persistence operation as a write failure.
+fn write_failure(_error: CacheError) -> CacheFailure {
+    CacheFailure::Write
+}
 
 /// Disambiguates temp-file names for concurrent writers within one process.
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);

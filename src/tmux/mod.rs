@@ -24,7 +24,7 @@ use std::fmt;
 
 use thiserror::Error;
 
-use crate::command::{CommandRunner, CommandSpec};
+use crate::command::{CommandFailure, CommandRunner, CommandSpec};
 
 #[derive(Debug, Clone, Default)]
 /// tmux metadata passed into the status renderer.
@@ -55,6 +55,16 @@ impl TmuxContext {
             TmuxField::Window => &mut self.window,
             TmuxField::Pane => &mut self.pane,
             TmuxField::Socket => &mut self.socket,
+        }
+    }
+
+    /// Whether `field` was supplied by the caller already.
+    const fn has_field(&self, field: TmuxField) -> bool {
+        match field {
+            TmuxField::Session => self.session.is_some(),
+            TmuxField::Window => self.window.is_some(),
+            TmuxField::Pane => self.pane.is_some(),
+            TmuxField::Socket => self.socket.is_some(),
         }
     }
 }
@@ -103,12 +113,12 @@ const TMUX_FIELDS: [TmuxField; 4] = [
 pub enum TmuxProbeFailure {
     /// The `display-message` invocation could not be run or exited non-zero,
     /// which is what a missing tmux or a dead server looks like.
-    #[error("`tmux display-message -p {field}` failed: {source}")]
+    #[error("`tmux display-message -p {field}` failed: {failure}")]
     CommandFailed {
         /// The field being queried when the command failed.
         field: TmuxField,
         /// The underlying command failure.
-        source: crate::command::CommandError,
+        failure: CommandFailure,
     },
     /// tmux answered, but with an empty value, so the field stays unset.
     #[error("`tmux display-message -p {field}` returned an empty value")]
@@ -181,7 +191,7 @@ pub fn resolve_context(runner: &dyn CommandRunner, context: TmuxContext) -> Tmux
         };
     }
 
-    match query_fields(runner) {
+    match query_fields(runner, &context) {
         Ok(values) => merge_fields(context, values),
         Err(failure) => TmuxResolution {
             context,
@@ -203,21 +213,28 @@ fn query_field(runner: &dyn CommandRunner, field: TmuxField) -> Result<String, T
     runner
         .run(&field_spec(field.format()))
         .map(|output| output.stdout.trim().to_owned())
-        .map_err(|source| TmuxProbeFailure::CommandFailed { field, source })
+        .map_err(|source| TmuxProbeFailure::CommandFailed {
+            field,
+            failure: CommandFailure::from(&source),
+        })
 }
 
-/// Query the four tmux fields, one `display-message` invocation apiece.
+/// Query the fields that the caller did not supply, one invocation apiece.
 ///
 /// Packing the fields into a single delimited format string would be cheaper,
 /// but no delimiter is safe: tmux only forbids `:` and `.` in session names, so
 /// a session called `a|b` (or one containing any other candidate separator)
 /// would shift every subsequent field. The extra processes are affordable
-/// because this is a fallback path, not the per-refresh hot path:
-/// `resolve_context` short-circuits via `is_complete`, and the installed tmux
-/// snippet normally passes `--session/--window/--pane/--socket` explicitly.
-fn query_fields(runner: &dyn CommandRunner) -> Result<Vec<(TmuxField, String)>, TmuxProbeFailure> {
+/// because this is a fallback path, not the per-refresh hot path. Passing the
+/// caller's context also avoids duplicate queries for values the installed
+/// snippet already supplied.
+fn query_fields(
+    runner: &dyn CommandRunner,
+    context: &TmuxContext,
+) -> Result<Vec<(TmuxField, String)>, TmuxProbeFailure> {
     TMUX_FIELDS
         .into_iter()
+        .filter(|field| !context.has_field(*field))
         .map(|field| query_field(runner, field).map(|value| (field, value)))
         .collect()
 }

@@ -18,7 +18,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use mockable::Clock;
 
-use crate::cache::{self, CacheError, CacheLookup};
+use crate::cache::FileCacheStorage;
 use crate::command::CommandRunner;
 use crate::config::{RefreshArgs, StatusArgs};
 use crate::error::DbarError;
@@ -28,10 +28,12 @@ use crate::render;
 use crate::tmux::{self, TmuxContext, TmuxProbeFailure};
 use crate::types::CacheTtlSeconds;
 
+pub(crate) mod cache;
 pub mod cache_key;
 pub mod clock;
 pub mod pr;
 
+use cache::{CacheReader, CacheStorage, CacheWriter, CachedPrRead, CachedValue};
 use cache_key::pr_cache_path;
 use clock::render_clock;
 use pr::{
@@ -77,6 +79,20 @@ pub struct StatusReport {
     pub diagnostics: StatusDiagnostics,
 }
 
+/// Dependencies used to assemble one status report.
+struct StatusBuild<'a> {
+    /// Parsed status settings.
+    args: &'a StatusArgs,
+    /// Directory whose metadata is rendered.
+    project_dir: &'a Utf8Path,
+    /// Command runner for git and tmux probes.
+    runner: &'a dyn CommandRunner,
+    /// Clock for cache expiry and the optional clock segment.
+    clock: &'a dyn Clock,
+    /// Read-only cache port for the status query.
+    cache: &'a dyn CacheReader,
+}
+
 /// Build a full tmux status line, reporting every absorbed probe failure.
 ///
 /// This replaces the earlier `build_status_line`: the rendered line is
@@ -92,8 +108,19 @@ pub fn build_status_report(
     runner: &dyn CommandRunner,
     clock: &dyn Clock,
 ) -> Result<StatusReport, DbarError> {
-    let project = git::project_name(runner, project_dir);
-    let git_outcome = git::git_status(runner, project_dir);
+    build_status_report_with_cache(&StatusBuild {
+        args,
+        project_dir,
+        runner,
+        clock,
+        cache: &FileCacheStorage,
+    })
+}
+
+/// Build a status line with an injected read-only cache port.
+fn build_status_report_with_cache(request: &StatusBuild<'_>) -> Result<StatusReport, DbarError> {
+    let project = git::project_name(request.runner, request.project_dir);
+    let git_outcome = git::git_status(request.runner, request.project_dir);
 
     // No branch means no lookup: the cache key and the branch heuristic both
     // need one, so a non-repository — and equally a detached `HEAD`, which has
@@ -102,19 +129,29 @@ pub fn build_status_report(
     let pr_report = git_outcome
         .status()
         .and_then(|status| status.branch.as_ref())
-        .filter(|_| args.show_pr.unwrap_or(true))
-        .map(|branch| load_cached_pr(args, clock, project_dir, branch.as_ref()));
+        .filter(|_| request.args.show_pr.unwrap_or(true))
+        .map(|branch| {
+            load_cached_pr(
+                &CachedPrRead {
+                    args: request.args,
+                    clock: request.clock,
+                    project_dir: request.project_dir,
+                    branch: branch.as_ref(),
+                },
+                request.cache,
+            )
+        });
 
     let tmux_resolution = tmux::resolve_context(
-        runner,
+        request.runner,
         TmuxContext {
-            session: args.session.clone(),
-            window: args.window.clone(),
-            pane: args.pane.clone(),
-            socket: args.socket.clone(),
+            session: request.args.session.clone(),
+            window: request.args.window.clone(),
+            pane: request.args.pane.clone(),
+            socket: request.args.socket.clone(),
         },
     );
-    let clock_label = render_clock(args, clock)?;
+    let clock_label = render_clock(request.args, request.clock)?;
 
     let line = render::render_status_line(&render::RenderContext {
         project: &project.name,
@@ -124,7 +161,7 @@ pub fn build_status_report(
             .and_then(|report| report.pr_number.as_ref()),
         tmux: Some(&tmux_resolution.context),
         clock: clock_label.as_deref(),
-        client_width: args.client_width.map(usize::from),
+        client_width: request.args.client_width.map(usize::from),
     });
 
     // The project-name probe is a git probe like any other, so its failures
@@ -160,9 +197,10 @@ struct PrLookup<'a> {
 
 /// Refresh the PR cache through the explicit GitHub and storage boundary.
 ///
-/// This is the only place that touches the cache: [`pr::decide`] states the
-/// policy and asks for a write, and this boundary carries it out, so a cache
-/// failure is reported rather than silently swallowed inside the policy.
+/// This is the only path that invokes GitHub or writes the cache.
+/// [`load_cached_pr`] reads cached values during `status`; this explicit
+/// refresh applies [`pr::decide`]'s persistence request and reports any cache
+/// failure instead of silently swallowing it inside the policy.
 pub struct RefreshRequest<'a> {
     /// Parsed refresh settings.
     pub args: &'a RefreshArgs,
@@ -178,6 +216,14 @@ pub struct RefreshRequest<'a> {
 
 /// Refresh one cached PR value through the explicit write boundary.
 pub fn refresh_pr_cache(request: &RefreshRequest<'_>) -> PrLookupReport {
+    refresh_pr_cache_with_storage(request, &FileCacheStorage)
+}
+
+/// Refresh one cached PR value through an injected read/write cache port.
+fn refresh_pr_cache_with_storage(
+    request: &RefreshRequest<'_>,
+    cache: &dyn CacheStorage,
+) -> PrLookupReport {
     let context = PrLookup {
         cache_dir: request.args.cache_dir.clone(),
         ttl: request.args.pr_cache_ttl_or_default(),
@@ -186,19 +232,17 @@ pub fn refresh_pr_cache(request: &RefreshRequest<'_>) -> PrLookupReport {
         project_dir: request.project_dir,
         branch: request.branch,
     };
-    resolve_pr_number(&context)
+    resolve_pr_number(&context, cache)
 }
 
 /// Resolve the PR number, performing the cache read and write here.
-fn resolve_pr_number(context: &PrLookup<'_>) -> PrLookupReport {
-    match cache::resolve_cache_dir(context.cache_dir.clone()) {
+fn resolve_pr_number(context: &PrLookup<'_>, cache: &dyn CacheStorage) -> PrLookupReport {
+    match cache.resolve_dir(context.cache_dir.clone()) {
         Ok(dir) => {
             let path = pr_cache_path(&dir, context.project_dir, context.branch);
-            resolve_with_cache(context, &dir, &path)
+            resolve_with_cache(context, &dir, &path, cache)
         }
-        Err(error) => {
-            resolve_without_cache(context, CacheOutcome::DirUnavailable(cache_failure(&error)))
-        }
+        Err(error) => resolve_without_cache(context, CacheOutcome::DirUnavailable(error), cache),
     }
 }
 
@@ -208,29 +252,34 @@ fn resolve_pr_number(context: &PrLookup<'_>) -> PrLookupReport {
 /// this boundary — having just decided to go upstream — calls
 /// [`cache::sweep_cache_dir`] itself, so the reclamation is visible here
 /// rather than hidden inside the load.
-fn resolve_with_cache(context: &PrLookup<'_>, dir: &Utf8Path, path: &Utf8Path) -> PrLookupReport {
+fn resolve_with_cache(
+    context: &PrLookup<'_>,
+    dir: &Utf8Path,
+    path: &Utf8Path,
+    cache: &dyn CacheStorage,
+) -> PrLookupReport {
     // Absent when no layer set a TTL, so the documented default is applied
     // after merging; a clap default would shadow the lower layers.
     let ttl = context.ttl;
-    match cache::load_cached_value(path, context.clock, ttl) {
-        Ok(CacheLookup::Fresh(value)) => PrLookupReport {
+    match cache.load(path, context.clock, ttl) {
+        Ok(CachedValue::Fresh(value)) => PrLookupReport {
             pr_number: pr::pr_from_cache_entry(value),
             cache: CacheOutcome::Hit,
             resolution: PrResolution::FromCache,
             write: CacheWriteOutcome::Skipped(PersistSkipReason::ServedFromCache),
         },
-        Ok(CacheLookup::Missing) => lookup_and_persist(context, CacheOutcome::Miss, Some(path)),
-        Ok(CacheLookup::Expired) => {
-            let outcome = reclaim_expired_entries(context, dir, ttl);
-            lookup_and_persist(context, outcome, Some(path))
+        Ok(CachedValue::Missing) => {
+            lookup_and_persist(context, CacheOutcome::Miss, Some(path), cache)
+        }
+        Ok(CachedValue::Expired) => {
+            let outcome = reclaim_expired_entries(context, dir, ttl, cache);
+            lookup_and_persist(context, outcome, Some(path), cache)
         }
         // A corrupt or unreadable entry is treated as a miss for rendering
         // purposes, but the read failure is carried into the report.
-        Err(error) => lookup_and_persist(
-            context,
-            CacheOutcome::ReadFailed(cache_failure(&error)),
-            Some(path),
-        ),
+        Err(error) => {
+            lookup_and_persist(context, CacheOutcome::ReadFailed(error), Some(path), cache)
+        }
     }
 }
 
@@ -242,33 +291,39 @@ fn reclaim_expired_entries(
     context: &PrLookup<'_>,
     dir: &Utf8Path,
     ttl: CacheTtlSeconds,
+    cache: &dyn CacheWriter,
 ) -> CacheOutcome {
-    match cache::sweep_cache_dir(dir, context.clock, ttl) {
+    match cache.sweep(dir, context.clock, ttl) {
         Ok(()) => CacheOutcome::Miss,
-        Err(error) => CacheOutcome::ReadFailed(cache_failure(&error)),
+        Err(error) => CacheOutcome::ReadFailed(error),
     }
 }
 
 /// Look up without any cache path: nothing is read and nothing is written.
-fn resolve_without_cache(context: &PrLookup<'_>, cache: CacheOutcome) -> PrLookupReport {
-    lookup_and_persist(context, cache, None)
+fn resolve_without_cache(
+    context: &PrLookup<'_>,
+    outcome: CacheOutcome,
+    cache: &dyn CacheWriter,
+) -> PrLookupReport {
+    lookup_and_persist(context, outcome, None, cache)
 }
 
 /// Run the GitHub lookup, apply the policy, and carry out its write request.
 fn lookup_and_persist(
     context: &PrLookup<'_>,
-    cache: CacheOutcome,
+    cache_outcome: CacheOutcome,
     path: Option<&Utf8Path>,
+    cache: &dyn CacheWriter,
 ) -> PrLookupReport {
     let lookup = context
         .github
         .pr_number(context.project_dir, context.branch)
         .map_err(|error| github_failure(&error));
     let decision = pr::decide(lookup, context.branch);
-    let write = persist(context, path, decision.persist);
+    let write = persist(context, path, decision.persist, cache);
     PrLookupReport {
         pr_number: decision.pr_number,
-        cache,
+        cache: cache_outcome,
         resolution: decision.resolution,
         write,
     }
@@ -279,6 +334,7 @@ fn persist(
     context: &PrLookup<'_>,
     path: Option<&Utf8Path>,
     request: PersistRequest,
+    cache: &dyn CacheWriter,
 ) -> CacheWriteOutcome {
     let value = match request {
         PersistRequest::Skip(reason) => return CacheWriteOutcome::Skipped(reason),
@@ -287,57 +343,40 @@ fn persist(
     let Some(target) = path else {
         return CacheWriteOutcome::Skipped(PersistSkipReason::CacheUnavailable);
     };
-    match cache::store_cached_value(target, context.clock, value) {
+    match cache.store(target, context.clock, value) {
         Ok(()) => CacheWriteOutcome::Stored,
-        Err(error) => CacheWriteOutcome::Failed(cache_failure(&error)),
+        Err(error) => CacheWriteOutcome::Failed(error),
     }
 }
 
 /// Read a PR value for the status query without invoking GitHub or mutating
 /// the cache.
-fn load_cached_pr(
-    args: &StatusArgs,
-    clock: &dyn Clock,
-    project_dir: &Utf8Path,
-    branch: &str,
-) -> PrLookupReport {
+fn load_cached_pr(request: &CachedPrRead<'_>, cache: &dyn CacheReader) -> PrLookupReport {
     let unavailable = || PrLookupReport {
         pr_number: None,
         cache: CacheOutcome::Miss,
         resolution: PrResolution::NoPr,
         write: CacheWriteOutcome::Skipped(PersistSkipReason::StatusReadOnly),
     };
-    let Ok(dir) = cache::resolve_cache_dir(args.cache_dir.clone()) else {
+    let Ok(dir) = cache.resolve_dir(request.args.cache_dir.clone()) else {
         return PrLookupReport {
             cache: CacheOutcome::DirUnavailable(CacheFailure::DirectoryUnavailable),
             ..unavailable()
         };
     };
-    let path = pr_cache_path(&dir, project_dir, branch);
-    match cache::load_cached_value(&path, clock, args.pr_cache_ttl_or_default()) {
-        Ok(CacheLookup::Fresh(value)) => PrLookupReport {
+    let path = pr_cache_path(&dir, request.project_dir, request.branch);
+    match cache.load(&path, request.clock, request.args.pr_cache_ttl_or_default()) {
+        Ok(CachedValue::Fresh(value)) => PrLookupReport {
             pr_number: pr::pr_from_cache_entry(value),
             cache: CacheOutcome::Hit,
             resolution: PrResolution::FromCache,
             write: CacheWriteOutcome::Skipped(PersistSkipReason::ServedFromCache),
         },
-        Ok(CacheLookup::Missing | CacheLookup::Expired) => unavailable(),
+        Ok(CachedValue::Missing | CachedValue::Expired) => unavailable(),
         Err(_) => PrLookupReport {
             cache: CacheOutcome::ReadFailed(CacheFailure::Read),
             ..unavailable()
         },
-    }
-}
-
-/// Convert a storage adapter error at the application boundary.
-const fn cache_failure(error: &CacheError) -> CacheFailure {
-    match error {
-        CacheError::MissingBaseDir | CacheError::InvalidUtf8 => CacheFailure::DirectoryUnavailable,
-        CacheError::Serde(_) | CacheError::EntryTooLarge { .. } => CacheFailure::Read,
-        CacheError::MissingFileName
-        | CacheError::ClockSkew
-        | CacheError::Io(_)
-        | CacheError::Retention { .. } => CacheFailure::Write,
     }
 }
 

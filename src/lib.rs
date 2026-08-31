@@ -57,9 +57,10 @@ pub fn run() -> Result<(), DbarError> {
     // Resolve every ambient input at this boundary so nothing below reads the
     // process environment directly.
     let diagnostics_enabled = diagnostics_enabled(&DefaultEnv::new());
+    let working_directory = ProcessWorkingDirectory;
     match config::load_command()? {
-        DbarCommand::Status(args) => run_status(&args, diagnostics_enabled),
-        DbarCommand::Refresh(args) => run_refresh(&args, diagnostics_enabled),
+        DbarCommand::Status(args) => run_status(&args, diagnostics_enabled, &working_directory),
+        DbarCommand::Refresh(args) => run_refresh(&args, diagnostics_enabled, &working_directory),
         DbarCommand::Install(args) => run_install(args),
     }
 }
@@ -108,10 +109,14 @@ fn flush_writer(writer: &mut impl Write) -> io::Result<()> {
 }
 
 /// Render a status line segment and print it to stdout.
-fn run_status(args: &config::StatusArgs, diagnostics_enabled: bool) -> Result<(), DbarError> {
+fn run_status(
+    args: &config::StatusArgs,
+    diagnostics_enabled: bool,
+    working_directory: &dyn WorkingDirectory,
+) -> Result<(), DbarError> {
     let runner = RealCommandRunner;
     let clock = DefaultClock;
-    let project_dir = resolve_project_dir(args.project_dir.as_deref())?;
+    let project_dir = resolve_project_dir(args.project_dir.as_deref(), working_directory)?;
     let report = status::build_status_report(args, &project_dir, &runner, &clock)?;
     let mut stdout = io::stdout();
     write_line(&mut stdout, &report.line)?;
@@ -125,12 +130,22 @@ fn run_status(args: &config::StatusArgs, diagnostics_enabled: bool) -> Result<()
 }
 
 /// Refresh the PR cache explicitly, leaving `status` as a read-only query.
-fn run_refresh(args: &config::RefreshArgs, diagnostics_enabled: bool) -> Result<(), DbarError> {
+fn run_refresh(
+    args: &config::RefreshArgs,
+    diagnostics_enabled: bool,
+    working_directory: &dyn WorkingDirectory,
+) -> Result<(), DbarError> {
     let runner = RealCommandRunner;
     let clock = DefaultClock;
-    let project_dir = resolve_project_dir(args.project_dir.as_deref())?;
+    let project_dir = resolve_project_dir(args.project_dir.as_deref(), working_directory)?;
     let git = git::git_status(&runner, &project_dir);
     let Some(branch) = git.status().and_then(|status| status.branch.as_ref()) else {
+        let diagnostics = refresh_diagnostics(git, None);
+        report_diagnostics(
+            &mut io::stderr(),
+            &diagnostics,
+            diagnostics_enabled || args.diagnostics == Some(true),
+        )?;
         return Ok(());
     };
     let mock_client = args.github_mock_pr.as_deref().map(MockGitHubClient::new);
@@ -147,11 +162,7 @@ fn run_refresh(args: &config::RefreshArgs, diagnostics_enabled: bool) -> Result<
         github,
     };
     let report = status::refresh_pr_cache(&request);
-    let diagnostics = status::StatusDiagnostics {
-        git: git.into_failures(),
-        tmux: Vec::new(),
-        pr: Some(report),
-    };
+    let diagnostics = refresh_diagnostics(git, Some(report));
     report_diagnostics(
         &mut io::stderr(),
         &diagnostics,
@@ -161,14 +172,41 @@ fn run_refresh(args: &config::RefreshArgs, diagnostics_enabled: bool) -> Result<
 }
 
 /// Resolve the project directory at the CLI boundary, before query handling.
-fn resolve_project_dir(project_dir: Option<&Utf8Path>) -> Result<Utf8PathBuf, DbarError> {
+trait WorkingDirectory {
+    /// Resolve the process working directory at the application boundary.
+    fn current_dir(&self) -> io::Result<Utf8PathBuf>;
+}
+
+/// The process-backed working-directory adapter used by the CLI boundary.
+struct ProcessWorkingDirectory;
+
+impl WorkingDirectory for ProcessWorkingDirectory {
+    fn current_dir(&self) -> io::Result<Utf8PathBuf> {
+        Utf8PathBuf::from_path_buf(std::env::current_dir()?)
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "current directory is not UTF-8"))
+    }
+}
+
+fn resolve_project_dir(
+    project_dir: Option<&Utf8Path>,
+    working_directory: &dyn WorkingDirectory,
+) -> Result<Utf8PathBuf, DbarError> {
     if let Some(path) = project_dir {
         return Ok(path.to_path_buf());
     }
-    let current = std::env::current_dir()?;
-    Utf8PathBuf::from_path_buf(current).map_err(|_| {
-        io::Error::new(ErrorKind::InvalidData, "current directory is not UTF-8").into()
-    })
+    Ok(working_directory.current_dir()?)
+}
+
+/// Assemble refresh diagnostics whether or not a branch was available.
+fn refresh_diagnostics(
+    git: git::GitStatusOutcome,
+    pr: Option<status::pr::PrLookupReport>,
+) -> status::StatusDiagnostics {
+    status::StatusDiagnostics {
+        git: git.into_failures(),
+        tmux: Vec::new(),
+        pr,
+    }
 }
 
 /// The lines to mirror to stderr, which is none unless diagnostics are enabled.
@@ -211,7 +249,7 @@ fn run_install(args: config::InstallArgs) -> Result<(), DbarError> {
     // default of `false`. Read before `path` is moved out of `args`.
     let mode = install::RunMode::from_dry_run(args.is_dry_run());
     let width = install::Width::from_full(args.is_full());
-    let position = args.position.unwrap_or_default();
+    let position = args.position.map(Into::into).unwrap_or_default();
     let path = args
         .path
         .or_else(|| Some(config::default_tmux_config_path()));
