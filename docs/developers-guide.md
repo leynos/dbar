@@ -98,10 +98,12 @@ entry points invoked from `main`: `run_status`, `run_refresh`, and
 
 ### End-to-end assembly of a status line
 
-1. `run_status` in `src/lib.rs` constructs a `RealCommandRunner` and a
-   `DefaultClock` (from `mockable`), then resolves the project directory at the
-   CLI boundary. It does not construct a GitHub client: status is a read-only
-   query.
+1. `run_status` in `src/lib.rs` constructs a `RealCommandRunner`, a
+   `DefaultClock` (from `mockable`), and a `FileCacheStorage`, then resolves the
+   project directory at the CLI boundary and passes a `StatusDependencies` value
+   containing the runner, clock, and cache's read port to
+   `status::build_status_report`. It does not construct a GitHub client: status
+   is a read-only query.
 2. `status::build_status_report` receives that directory, then calls
    `git::project_name` and `git::git_status`.
 3. If PR display is enabled and a git branch was found, status reads the
@@ -109,9 +111,10 @@ entry points invoked from `main`: `run_status`, `run_refresh`, and
    rendered; a missing, expired, or unreadable entry leaves the PR segment
    absent until `dbar refresh` performs the live lookup. Status never calls
    GitHub, sweeps expired entries, or writes the cache.
-4. `run_refresh` constructs the GitHub client and calls
-   `status::refresh_pr_cache`. That boundary applies `status::pr::decide` to
-   the lookup result and writes successful values through
+4. `run_refresh` constructs the GitHub client and a `FileCacheStorage`, then
+   injects its `CacheStorage` port into `status::refresh_pr_cache`. That
+   boundary applies `status::pr::decide` to the lookup result and writes
+   successful values through
    `cache::store_cached_value`; failed lookups are not cached, so a transient
    network error does not poison the PR value for the whole TTL.
 5. `tmux::resolve_context` fills in any tmux fields not already supplied on
@@ -136,12 +139,12 @@ branch a checkout has ever had, including branches long since deleted.
 
 - **Trigger.** A read never sweeps. `load_cached_value` reports an entry past
   its TTL as `CacheLookup::Expired` and leaves it on disk;
-  `status::resolve_with_cache`, used by the explicit refresh path after it has
-  decided to go upstream, calls `cache::sweep_cache_dir` itself. The
-  reclamation is therefore visible at the call site rather than hidden behind a
-  `load_*` name. The common `status` cache hit — taken on every tmux redraw —
-  never lists the directory. Writes never sweep either because
-  `store_cached_value` is given no TTL to judge entries by.
+  status reads the current entry but never lists the directory. After resolving
+  the cache directory, every explicit `dbar refresh` invokes the bounded sweep
+  before resolving the current key, regardless of whether that key is fresh,
+  missing, or expired. The reclamation is therefore visible at the refresh call
+  site rather than hidden behind a `load_*` name. Writes never sweep either
+  because `store_cached_value` is given no TTL to judge entries by.
 - **Bound.** One sweep lists at most 256 names, opens and parses at most 16
   of them, and removes at most 8 files. A backlog is therefore cleared across
   successive runs rather than in one unbounded pass on the hot path.

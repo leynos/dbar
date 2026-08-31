@@ -350,8 +350,8 @@ Delivered internal interfaces:
   `Merge(Arc<ortho_config::OrthoError>)` for environment/config-file
   merge failures, and `InvalidClockFormat(String)` for a `clock_format`
   value chrono cannot render.
-- `status::build_status_report(args: &StatusArgs, runner: &dyn
-  CommandRunner, clock: &dyn Clock, github: &dyn GitHubClient) ->
+- `status::build_status_report(args: &StatusArgs, project_dir: &Utf8Path,
+  dependencies: &StatusDependencies<'_>) ->
   Result<StatusReport, DbarError>`: assembles and returns a `StatusReport`
   holding the rendered `line` and a `StatusDiagnostics` value recording
   every absorbed probe failure; there is no separate `StatusContext` type.
