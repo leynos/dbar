@@ -21,7 +21,7 @@ jobs:
             echo "dbar unexpectedly compiled for a non-Unix target" >&2
             exit 1
           fi
-          rg --fixed-strings "dbar supports Unix targets only" /tmp/dbar-non-unix-check.log
+          grep --fixed-strings --quiet "dbar supports Unix targets only" /tmp/dbar-non-unix-check.log
 
   build-test:
     runs-on: ubuntu-latest
