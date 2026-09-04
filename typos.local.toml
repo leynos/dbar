@@ -7,7 +7,12 @@ stems = []
 
 [words]
 # Microsoft product title: "Azure Architecture Center".
-accepted = ["Center"]
+# "color" and "flavor" are US-spelled identifiers in third-party APIs, quoted
+# verbatim in inline code: the CSS/API property named in the documentation
+# style guide, and tokio's `#[tokio::test(flavor = "...")]` attribute. Both are
+# narrow word exceptions rather than a pattern, so ordinary prose using the
+# en-GB spellings is still checked.
+accepted = ["Center", "color", "flavor"]
 
 [words.corrections]
 

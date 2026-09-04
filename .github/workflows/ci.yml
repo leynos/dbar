@@ -6,6 +6,25 @@ name: CI
   workflow_dispatch:
 
 jobs:
+  unix-only-build-contract:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - name: Setup Rust
+        uses: leynos/shared-actions/.github/actions/setup-rust@3c1fa01bcf4c26dac79975c18b74c01d577dcf95
+      - name: Verify non-Unix builds are rejected
+        run: |
+          rustup target add x86_64-pc-windows-gnu
+          if cargo check --target x86_64-pc-windows-gnu > /tmp/dbar-non-unix-check.log 2>&1; then
+            echo "dbar unexpectedly compiled for a non-Unix target" >&2
+            exit 1
+          fi
+          grep --fixed-strings --quiet "dbar supports Unix targets only" /tmp/dbar-non-unix-check.log
+
   build-test:
     runs-on: ubuntu-latest
     permissions:
@@ -16,6 +35,8 @@ jobs:
       WHITAKER_INSTALLER_VERSION: '0.2.6'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@3c1fa01bcf4c26dac79975c18b74c01d577dcf95
       - name: Setup uv

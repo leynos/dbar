@@ -1,0 +1,246 @@
+//! Snapshot coverage for the status line output.
+
+use std::io;
+use std::process::Command;
+
+use camino::Utf8PathBuf;
+use tempfile::TempDir;
+
+use super::tmux_width::visible_width;
+
+/// The value passed to `--client-width` by the full-width snapshot test.
+const CLIENT_WIDTH: usize = 80;
+
+/// Clear the git repository redirection variables from a child process.
+///
+/// `dbar` runs git itself, so the same `GIT_DIR`, `GIT_WORK_TREE` and
+/// `GIT_INDEX_FILE` that [`run_git`] clears would otherwise steer the status
+/// probe away from the fixture and into whatever repository the suite happens
+/// to be running under.
+fn isolate_git_redirection(cmd: &mut assert_cmd::Command) {
+    cmd.env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE");
+}
+
+#[test]
+fn status_snapshot_without_git() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let project_dir = create_project_dir(&temp_dir).expect("create project dir");
+
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("dbar");
+    cmd.args([
+        "status",
+        "--project-dir",
+        project_dir.as_str(),
+        "--show-pr",
+        "false",
+        "--session",
+        "demo",
+        "--window",
+        "1",
+        "--pane",
+        "%0",
+        "--socket",
+        "/tmp/tmux-demo",
+    ]);
+    isolate_git_redirection(&mut cmd);
+    let output = cmd.assert().success().get_output().stdout.clone();
+    let text = String::from_utf8_lossy(&output).trim().to_owned();
+    insta::assert_snapshot!(text);
+}
+
+#[test]
+fn status_renders_configured_clock() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let project_dir = create_project_dir(&temp_dir).expect("create project dir");
+
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("dbar");
+    cmd.args([
+        "status",
+        "--project-dir",
+        project_dir.as_str(),
+        "--show-pr",
+        "false",
+        "--show-clock",
+        "true",
+        "--clock-format",
+        "clock",
+        "--session",
+        "demo",
+        "--window",
+        "1",
+        "--pane",
+        "%0",
+    ]);
+    isolate_git_redirection(&mut cmd);
+    let output = cmd.assert().success().get_output().stdout.clone();
+    let text = String::from_utf8_lossy(&output).trim().to_owned();
+    assert!(text.contains("\u{f017} clock"));
+}
+
+#[test]
+fn status_snapshot_clean_git_full_width_with_pr() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let repo_dir = create_project_dir(&temp_dir).expect("create project dir");
+    init_repo(&repo_dir).expect("init repo");
+    let cache_dir =
+        Utf8PathBuf::from_path_buf(temp_dir.path().join("cache")).expect("cache path is UTF-8");
+
+    let mut refresh = assert_cmd::cargo::cargo_bin_cmd!("dbar");
+    refresh.args([
+        "refresh",
+        "--project-dir",
+        repo_dir.as_str(),
+        "--cache-dir",
+        cache_dir.as_str(),
+        "--github-mock-pr",
+        "42",
+    ]);
+    isolate_git_redirection(&mut refresh);
+    refresh.assert().success();
+
+    let client_width = CLIENT_WIDTH.to_string();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("dbar");
+    cmd.args([
+        "status",
+        "--project-dir",
+        repo_dir.as_str(),
+        "--show-pr",
+        "true",
+        "--cache-dir",
+        cache_dir.as_str(),
+        "--client-width",
+        client_width.as_str(),
+        "--session",
+        "demo",
+        "--window",
+        "1",
+        "--pane",
+        "%0",
+        "--socket",
+        "/tmp/tmux-demo",
+    ]);
+    isolate_git_redirection(&mut cmd);
+    let output = cmd.assert().success().get_output().stdout.clone();
+    let raw = String::from_utf8_lossy(&output);
+
+    // The `--client-width` contract is "exactly 80" here, not "at most 80".
+    // `layout_with_width` in `src/render/mod.rs` never truncates: when the left
+    // and right segments fit it pads between them so the line fills the client
+    // width precisely, and when they do not fit it emits `left right` and
+    // overruns the width instead. This fixture fits, so the rendered line must
+    // measure exactly 80 columns. Measure the untrimmed line — trailing padding
+    // is part of the width — and count it as tmux would, ignoring `#[...]`
+    // style tags and treating `##` as one literal `#` column.
+    let rendered = raw.trim_end_matches('\n');
+    assert_eq!(
+        visible_width(rendered),
+        CLIENT_WIDTH,
+        "the rendered line must fill the requested client width exactly"
+    );
+
+    let text = raw.trim_end().to_owned();
+    insta::assert_snapshot!(text);
+}
+
+#[test]
+fn status_snapshot_dirty_git_default_width() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let repo_dir = create_project_dir(&temp_dir).expect("create project dir");
+    init_repo(&repo_dir).expect("init repo");
+    mark_repo_dirty(&repo_dir).expect("mark repo dirty");
+
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("dbar");
+    cmd.args([
+        "status",
+        "--project-dir",
+        repo_dir.as_str(),
+        "--show-pr",
+        "false",
+        "--session",
+        "demo",
+        "--window",
+        "1",
+        "--pane",
+        "%0",
+        "--socket",
+        "/tmp/tmux-demo",
+    ]);
+    isolate_git_redirection(&mut cmd);
+    let output = cmd.assert().success().get_output().stdout.clone();
+    let text = String::from_utf8_lossy(&output).trim_end().to_owned();
+    insta::assert_snapshot!(text);
+}
+
+fn init_repo(path: &Utf8PathBuf) -> io::Result<()> {
+    // An empty template keeps the developer's `~/.git-templates` hooks and
+    // description out of the fixture repository.
+    run_git(path, ["init", "-b", "main", "--template="])?;
+    write_file(path, "README.md", "seed")?;
+    run_git(path, ["add", "README.md"])?;
+    run_git(
+        path,
+        [
+            "-c",
+            "user.name=dbar",
+            "-c",
+            "user.email=dbar@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+    )
+}
+
+fn create_project_dir(temp_dir: &TempDir) -> io::Result<Utf8PathBuf> {
+    let temp_dir_path = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "temp dir path is not utf8"))?;
+    let project_dir = temp_dir_path.join("project");
+    cap_std::fs_utf8::Dir::open_ambient_dir(temp_dir_path.as_path(), cap_std::ambient_authority())
+        .and_then(|dir| dir.create_dir("project"))?;
+    Ok(project_dir)
+}
+
+fn mark_repo_dirty(path: &Utf8PathBuf) -> io::Result<()> {
+    write_file(path, "README.md", "updated")?;
+    run_git(path, ["add", "README.md"])?;
+    write_file(path, "README.md", "dirty")
+}
+
+fn write_file(path: &Utf8PathBuf, name: &str, contents: &str) -> io::Result<()> {
+    cap_std::fs_utf8::Dir::open_ambient_dir(path.as_path(), cap_std::ambient_authority())
+        .and_then(|dir| dir.write(name, contents))
+}
+
+/// Run git in `path`, isolated from the developer's own git configuration.
+///
+/// A global or system configuration can otherwise reach into the fixture —
+/// `init.defaultBranch`, `core.hooksPath`, `init.templateDir` and the like —
+/// and change what the snapshots record. Pointing both configuration files at
+/// `/dev/null` and setting `GIT_CONFIG_NOSYSTEM` makes the repository depend
+/// only on the arguments below.
+///
+/// The repository redirection variables `GIT_DIR`, `GIT_WORK_TREE` and
+/// `GIT_INDEX_FILE` are cleared for the same reason. A suite run from inside a
+/// git hook or a `git rebase --exec` inherits them, and any one of them would
+/// silently point these commands at the developer's repository instead of the
+/// fixture — `current_dir` alone does not override them. This matches the
+/// isolation `tests/rstest_bdd/status_steps.rs` already applies.
+fn run_git(path: &Utf8PathBuf, args: impl IntoIterator<Item = &'static str>) -> io::Result<()> {
+    let status = Command::new("git")
+        .args(args)
+        .current_dir(path.as_std_path())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other("git command failed"))
+    }
+}
