@@ -100,6 +100,21 @@ entry points invoked from `main`: `run_status`, `run_refresh`, and
   wrapping `CacheError`, `config::ConfigError` (itself wrapping
   `ortho_config::OrthoError`), `InstallError`, and `std::io::Error`.
 
+### Unix-only build contract
+
+The crate is deliberately restricted to Unix targets. `command/mod.rs` uses a
+compile-time `compile_error!` for every non-Unix build, with the diagnostic
+`dbar supports Unix targets only`. This is a contract rather than a tmux
+convenience: command timeouts put children in POSIX process groups so the
+whole descendant tree can be signalled, and the install transaction uses
+`flock` to serialize concurrent updates. Providing stubs on another platform
+would make those safety guarantees false.
+
+The `unix-only-build-contract` CI job installs the
+`x86_64-pc-windows-gnu` Rust target and runs `cargo check` for it. The job
+passes only when that check is rejected and its output contains the documented
+compile-time diagnostic, so the platform boundary remains tested.
+
 ### End-to-end assembly of a status line
 
 1. `run_status` in `src/lib.rs` constructs a `RealCommandRunner`, a
@@ -133,6 +148,28 @@ entry points invoked from `main`: `run_status`, `run_refresh`, and
    paths, filenames, or command stderr, and they are never mixed into stdout,
    so the tmux status-line contract is unchanged. See `report_diagnostics` in
    `src/lib.rs`.
+
+### Cache boundary
+
+The cache ports keep filesystem concerns out of status policy:
+
+- `CacheReader` resolves the cache directory and loads one entry with a clock
+  and TTL. Its result is `Fresh`, `Expired`, or `Missing`; it never creates,
+  updates, or removes a file. `build_status_report` receives this read-only
+  port and uses it while rendering status.
+- `CacheWriter` owns the mutating operations: the bounded retention `sweep`
+  and `store` for a refreshed value. `refresh_pr_cache` receives the combined
+  storage port and invokes these operations as required by the cache result
+  and persistence policy.
+- `CacheStorage` is the `CacheReader + CacheWriter` composition required by
+  refresh. It is not needed by status, which must remain a cache-only query.
+
+`FileCacheStorage` is the filesystem adapter implementing all three ports. The
+CLI composition functions construct it and pass its `CacheReader` view to
+`run_status`, or its `CacheStorage` view to `run_refresh`. The cache module
+maps filesystem errors to the adapter-neutral `CacheFailure` categories before
+they reach status, and tests can provide narrower port implementations without
+creating files or invoking GitHub.
 
 ### Cache retention
 
