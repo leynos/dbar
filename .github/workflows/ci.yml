@@ -12,6 +12,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@3c1fa01bcf4c26dac79975c18b74c01d577dcf95
       - name: Verify non-Unix builds are rejected
@@ -33,6 +35,8 @@ jobs:
       WHITAKER_INSTALLER_VERSION: '0.2.6'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@3c1fa01bcf4c26dac79975c18b74c01d577dcf95
       - name: Setup uv

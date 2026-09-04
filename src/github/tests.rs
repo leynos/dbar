@@ -42,11 +42,7 @@ fn runner_answering(stdout: &str) -> MockCommandRunner {
         .expect_run()
         .with(eq(expected_spec(Utf8Path::new(PROJECT_DIR), "main")))
         .times(1)
-        .returning(move |_| {
-            Ok(CommandOutput {
-                stdout: answer.clone(),
-            })
-        });
+        .returning(move |_| Ok(CommandOutput::from_stdout(answer.clone())));
     runner
 }
 
@@ -157,11 +153,7 @@ fn pr_number_builds_the_expected_command_spec(#[case] branch: &str) {
         .expect_run()
         .with(eq(expected_spec(project_dir, branch)))
         .times(1)
-        .returning(|_| {
-            Ok(CommandOutput {
-                stdout: "1".to_owned(),
-            })
-        });
+        .returning(|_| Ok(CommandOutput::from_stdout("1")));
     let client = GhCliClient::new(&runner);
     let _ = client.pr_number(project_dir, branch).expect("lookup");
 }

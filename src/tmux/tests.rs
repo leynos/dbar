@@ -94,7 +94,7 @@ impl Answers {
                 .returning(move |_| {
                     answer.clone().map_or_else(
                         || Err(query_failure()),
-                        |stdout| Ok(CommandOutput { stdout }),
+                        |stdout| Ok(CommandOutput::from_stdout(stdout)),
                     )
                 });
         }
@@ -150,11 +150,7 @@ fn resolve_context_preserves_prepopulated_fields() {
             .expect_run()
             .with(eq(expected_spec(field)))
             .times(1)
-            .returning(move |_| {
-                Ok(CommandOutput {
-                    stdout: stdout.to_owned(),
-                })
-            });
+            .returning(move |_| Ok(CommandOutput::from_stdout(stdout)));
     }
     let context = TmuxContext {
         session: Some("mine".to_owned()),

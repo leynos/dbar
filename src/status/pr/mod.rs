@@ -18,6 +18,7 @@
 //! | No entry or an expired entry ([`CacheOutcome::Miss`]) | no PR segment until `dbar refresh` stores a value |
 //! | Cache directory unresolvable ([`CacheOutcome::DirUnavailable`]) | no PR segment; nothing is read or written |
 //! | Cache read failed ([`CacheOutcome::ReadFailed`]) | no PR segment; `dbar refresh` can retry the lookup |
+//! | Retention sweep failed ([`CacheOutcome::RetentionSweepFailed`]) | the current key's hit or miss still applies; the failure is diagnosed separately |
 //! | GitHub returned a number ([`PrResolution::GitHub`]) | that number, and it is cached |
 //! | GitHub returned no PR ([`PrResolution::BranchFallback`], [`PrResolution::NoPr`]) | the branch-derived number if the branch names one, otherwise no PR segment; either way the result is cached |
 //! | GitHub lookup failed ([`PrResolution::LookupFailed`]) | the branch-derived number if the branch names one, otherwise no PR segment; **nothing is cached**, so a transient failure cannot poison the value for a whole TTL |
@@ -67,6 +68,16 @@ pub enum CacheOutcome {
     DirUnavailable(CacheFailure),
     /// Reading the entry failed, so the lookup proceeded as for a miss.
     ReadFailed(CacheFailure),
+    /// Reclaiming stale siblings failed after the current-key lookup completed.
+    ///
+    /// The nested outcome preserves whether that key was a hit, miss, or read
+    /// failure; only stale-entry reclamation degraded.
+    RetentionSweepFailed {
+        /// The current key's independently resolved cache outcome.
+        current: Box<Self>,
+        /// The bounded category of the retention failure.
+        failure: CacheFailure,
+    },
 }
 
 #[derive(Debug)]
@@ -183,16 +194,7 @@ impl PrLookupReport {
     /// assert!(report.describe_failures().is_empty());
     /// ```
     pub fn describe_failures(&self) -> Vec<String> {
-        let cache = match &self.cache {
-            CacheOutcome::Hit | CacheOutcome::Miss => None,
-            CacheOutcome::DirUnavailable(failure) => Some(format!(
-                "PR cache directory unavailable ({})",
-                failure.category()
-            )),
-            CacheOutcome::ReadFailed(failure) => {
-                Some(format!("PR cache read failed ({})", failure.category()))
-            }
-        };
+        let cache = cache_failures(&self.cache);
         let resolution = match &self.resolution {
             PrResolution::FromCache
             | PrResolution::GitHub
@@ -208,7 +210,29 @@ impl PrLookupReport {
                 Some(format!("PR cache write failed ({})", failure.category()))
             }
         };
-        [cache, resolution, write].into_iter().flatten().collect()
+        cache.into_iter().chain(resolution).chain(write).collect()
+    }
+}
+
+/// Describe failures in a cache outcome without discarding its current-key state.
+fn cache_failures(outcome: &CacheOutcome) -> Vec<String> {
+    match outcome {
+        CacheOutcome::Hit | CacheOutcome::Miss => Vec::new(),
+        CacheOutcome::DirUnavailable(failure) => vec![format!(
+            "PR cache directory unavailable ({})",
+            failure.category()
+        )],
+        CacheOutcome::ReadFailed(failure) => {
+            vec![format!("PR cache read failed ({})", failure.category())]
+        }
+        CacheOutcome::RetentionSweepFailed { current, failure } => {
+            let mut failures = cache_failures(current);
+            failures.push(format!(
+                "PR cache retention sweep failed ({})",
+                failure.category()
+            ));
+            failures
+        }
     }
 }
 

@@ -210,6 +210,8 @@ worth instrumenting.
 5. The failures already recorded by `status::StatusDiagnostics`
    (cache-directory failures via `status::pr::CacheOutcome::DirUnavailable`,
    cache-read failures via `status::pr::CacheOutcome::ReadFailed`,
+   retention-sweep failures reported separately from the current cache hit or
+   miss,
    cache-write failures via `status::pr::CacheWriteOutcome::Failed`, failed
    GitHub lookups via `status::pr::PrResolution::LookupFailed`, and the
    `git` and `tmux` probe failures) are also emitted as backend diagnostic

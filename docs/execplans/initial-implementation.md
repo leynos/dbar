@@ -379,6 +379,10 @@ Delivered internal interfaces:
   adjacent booleans of the same type can be transposed without the
   compiler noticing, and transposing these two would turn a preview into a
   write of the wrong variant.
+- `cache::{CacheReader, CacheWriter, CacheStorage}`: ports separating the
+  read-only status query from the refresh operation's retention and write
+  capabilities. `FileCacheStorage` implements all three ports at the CLI
+  composition boundary.
 - `cache::{resolve_cache_dir, load_cached_value,
   store_cached_value}`: helpers that resolve the XDG cache path and manage
   cached lookup files, as planned.
@@ -447,3 +451,7 @@ Revised 2026-08-31 to align the delivered development dependency inventory
 with `Cargo.toml`, including `chrono` for deterministic timestamp fixtures,
 and to document the `make typecheck` gate and atomic install wording in the
 developer guide.
+
+Revised 2026-09-04 to document the cache read/write ports, the explicit
+refresh retention boundary, and the Git filter preflight that prevents
+repository-controlled filters from running during status probes.

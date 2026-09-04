@@ -4,6 +4,7 @@
 //! and because that module is already at the line ceiling the repository lints
 //! enforce.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -14,16 +15,39 @@ use tempfile::TempDir;
 use super::pr_cache_path;
 use super::tests::{args_with_cache, exists, utf8_path};
 use super::{StatusDependencies, build_status_report};
-use crate::cache::{self, FileCacheStorage};
+use crate::cache::{self, CacheFailure, CacheReader, CachedValue, FileCacheStorage};
 use crate::command::{CommandError, CommandOutput, CommandSpec, MockCommandRunner};
 use crate::config::StatusArgs;
 use crate::git::git_command;
+use crate::types::CacheTtlSeconds;
 
 /// The project directory every probe in these tests is rooted at.
 const PROJECT_DIR: &str = "/projects/demo";
 
 /// The glyph the renderer draws before the branch label.
 const GLYPH_BRANCH: &str = "\u{f418}";
+
+/// A cache reader that records an attempted entry load.
+#[derive(Default)]
+struct RecordingCacheReader {
+    loads: Cell<usize>,
+}
+
+impl CacheReader for RecordingCacheReader {
+    fn resolve_dir(&self, _override_dir: Option<Utf8PathBuf>) -> Result<Utf8PathBuf, CacheFailure> {
+        Ok(Utf8PathBuf::from("/cache"))
+    }
+
+    fn load(
+        &self,
+        _path: &Utf8Path,
+        _clock: &dyn mockable::Clock,
+        _ttl: CacheTtlSeconds,
+    ) -> Result<CachedValue, CacheFailure> {
+        self.loads.set(self.loads.get() + 1);
+        Ok(CachedValue::Missing)
+    }
+}
 
 /// Build the spec one `git` probe rooted at the project directory produces.
 fn git_spec(args: &[&str]) -> CommandSpec {
@@ -64,9 +88,7 @@ fn detached_head_runner() -> MockCommandRunner {
         answers
             .get(spec)
             .map_or(Err(CommandError::NonZero { status: Some(1) }), |stdout| {
-                Ok(CommandOutput {
-                    stdout: stdout.clone(),
-                })
+                Ok(CommandOutput::from_stdout(stdout.clone()))
             })
     });
     runner
@@ -102,11 +124,7 @@ fn named_branch_runner() -> MockCommandRunner {
     runner.expect_run().returning(move |spec| {
         answers.get(spec).map_or_else(
             || Err(CommandError::NonZero { status: Some(1) }),
-            |stdout| {
-                Ok(CommandOutput {
-                    stdout: stdout.clone(),
-                })
-            },
+            |stdout| Ok(CommandOutput::from_stdout(stdout.clone())),
         )
     });
     runner
@@ -131,10 +149,11 @@ fn a_detached_head_renders_the_label_without_looking_up_a_pr() {
     };
     let clock = DefaultClock;
     let runner = detached_head_runner();
+    let cache = RecordingCacheReader::default();
     let dependencies = StatusDependencies {
         runner: &runner,
         clock: &clock,
-        cache: &FileCacheStorage,
+        cache: &cache,
     };
     let report = build_status_report(&args, Utf8Path::new(PROJECT_DIR), &dependencies)
         .expect("a detached HEAD must not fail the command");
@@ -148,6 +167,11 @@ fn a_detached_head_renders_the_label_without_looking_up_a_pr() {
     assert!(report.diagnostics.pr.is_none());
     // A detached HEAD is an ordinary state, so no git probe is diagnosed.
     assert!(report.diagnostics.git.is_empty());
+    assert_eq!(
+        cache.loads.get(),
+        0,
+        "detached HEAD must not load a PR cache entry"
+    );
 }
 
 #[rstest]

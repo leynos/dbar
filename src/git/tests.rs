@@ -66,9 +66,7 @@ impl Answers {
             outputs
                 .get(spec)
                 .map_or(Err(CommandError::NonZero { status: Some(1) }), |stdout| {
-                    Ok(CommandOutput {
-                        stdout: stdout.clone(),
-                    })
+                    Ok(CommandOutput::from_stdout(stdout.clone()))
                 })
         });
         runner

@@ -8,8 +8,8 @@ use super::tests::{
     rendered, write_raw,
 };
 use super::*;
-use crate::cache;
-use camino::Utf8Path;
+use crate::cache::{self, CacheFailure, CacheReader, CacheWriter, CachedValue};
+use camino::{Utf8Path, Utf8PathBuf};
 use mockable::DefaultClock;
 use rstest::rstest;
 use std::io;
@@ -25,6 +25,66 @@ fn expired_payload() -> String {
 /// Only the sweep can reclaim it, so its absence proves the sweep ran rather
 /// than merely that the entry under lookup was overwritten.
 const STALE_SIBLING: &str = "pr_00000000000000ab.json";
+
+/// Run one refresh lookup through a storage double owned by this test module.
+fn lookup_with_storage(
+    args: &crate::config::StatusArgs,
+    github: &dyn crate::github::GitHubClient,
+    clock: &dyn mockable::Clock,
+    cache: &dyn crate::cache::CacheStorage,
+) -> PrLookupReport {
+    resolve_pr_number(
+        &PrLookup {
+            cache_dir: args.cache_dir.clone(),
+            ttl: args.pr_cache_ttl_or_default(),
+            clock,
+            github,
+            project_dir: Utf8Path::new(PROJECT_DIR),
+            branch: BRANCH,
+        },
+        cache,
+    )
+}
+
+/// A storage double that proves a failed retention sweep does not hide a miss.
+struct SweepFailingCache {
+    dir: Utf8PathBuf,
+}
+
+impl CacheReader for SweepFailingCache {
+    fn resolve_dir(&self, _override_dir: Option<Utf8PathBuf>) -> Result<Utf8PathBuf, CacheFailure> {
+        Ok(self.dir.clone())
+    }
+
+    fn load(
+        &self,
+        _path: &Utf8Path,
+        _clock: &dyn mockable::Clock,
+        _ttl: crate::types::CacheTtlSeconds,
+    ) -> Result<CachedValue, CacheFailure> {
+        Ok(CachedValue::Missing)
+    }
+}
+
+impl CacheWriter for SweepFailingCache {
+    fn sweep(
+        &self,
+        _dir: &Utf8Path,
+        _clock: &dyn mockable::Clock,
+        _ttl: crate::types::CacheTtlSeconds,
+    ) -> Result<(), CacheFailure> {
+        Err(CacheFailure::Read)
+    }
+
+    fn store(
+        &self,
+        _path: &Utf8Path,
+        _clock: &dyn mockable::Clock,
+        _value: String,
+    ) -> Result<(), CacheFailure> {
+        Ok(())
+    }
+}
 
 #[rstest]
 fn an_expired_read_makes_the_boundary_sweep(cache_root: io::Result<(TempDir, Utf8PathBuf)>) {
@@ -95,5 +155,28 @@ fn a_missing_read_sweeps_stale_siblings(cache_root: io::Result<(TempDir, Utf8Pat
     assert!(
         !exists(&sibling),
         "a cache miss must run the same bounded retention sweep"
+    );
+}
+
+#[rstest]
+fn a_failed_sweep_preserves_the_cache_miss(cache_root: io::Result<(TempDir, Utf8PathBuf)>) {
+    let (_guard, cache_dir) = cache_root.expect("cache root");
+    let cache = SweepFailingCache {
+        dir: cache_dir.clone(),
+    };
+    let github = StubGitHubClient::new(Reply::Found("42"));
+    let clock = DefaultClock;
+
+    let report = lookup_with_storage(&args_with_cache(&cache_dir), &github, &clock, &cache);
+
+    assert_eq!(rendered(&report).as_deref(), Some("42"));
+    assert!(matches!(
+        &report.cache,
+        CacheOutcome::RetentionSweepFailed { current, failure: CacheFailure::Read }
+            if matches!(current.as_ref(), CacheOutcome::Miss)
+    ));
+    assert_eq!(
+        report.describe_failures(),
+        ["PR cache retention sweep failed (read)"]
     );
 }

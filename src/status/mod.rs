@@ -237,7 +237,10 @@ fn resolve_pr_number(context: &PrLookup<'_>, cache: &dyn CacheStorage) -> PrLook
             let retention = cache.sweep(&dir, context.clock, context.ttl).err();
             let mut report = resolve_with_cache(context, &path, cache);
             if let Some(failure) = retention {
-                report.cache = CacheOutcome::ReadFailed(failure);
+                report.cache = CacheOutcome::RetentionSweepFailed {
+                    current: Box::new(report.cache),
+                    failure,
+                };
             }
             report
         }

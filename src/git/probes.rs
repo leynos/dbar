@@ -4,6 +4,9 @@
 //! either the parsed value or the typed failure that forced a fallback. The
 //! fallbacks themselves are documented in the parent module.
 
+use std::ffi::OsString;
+use std::os::unix::ffi::OsStringExt as _;
+
 use camino::Utf8Path;
 
 use super::{GitProbe, GitProbeFailure};
@@ -85,11 +88,11 @@ const FILTER_ATTRIBUTE_BATCH: usize = 64;
 /// the probes report.
 pub(crate) fn git_command(
     project_dir: &Utf8Path,
-    args: impl IntoIterator<Item = impl Into<String>>,
+    args: impl IntoIterator<Item = impl Into<OsString>>,
 ) -> CommandSpec {
     let hardened = HARDENING_ARGS
         .iter()
-        .map(|option| (*option).to_owned())
+        .map(OsString::from)
         .chain(args.into_iter().map(Into::into));
     CommandSpec::new("git")
         .args(hardened)
@@ -101,12 +104,29 @@ fn run_probe(
     runner: &dyn CommandRunner,
     project_dir: &Utf8Path,
     probe: GitProbe,
-    args: impl IntoIterator<Item = impl Into<String>>,
+    args: impl IntoIterator<Item = impl Into<OsString>>,
 ) -> Result<String, GitProbeFailure> {
     let spec = git_command(project_dir, args);
     runner
         .run(&spec)
         .map(|output| output.stdout)
+        .map_err(|source| GitProbeFailure::CommandFailed {
+            probe,
+            failure: CommandFailure::from(&source),
+        })
+}
+
+/// Run one probe whose protocol carries arbitrary pathname bytes.
+fn run_probe_bytes(
+    runner: &dyn CommandRunner,
+    project_dir: &Utf8Path,
+    probe: GitProbe,
+    args: impl IntoIterator<Item = impl Into<OsString>>,
+) -> Result<Vec<u8>, GitProbeFailure> {
+    let spec = git_command(project_dir, args);
+    runner
+        .run(&spec)
+        .map(crate::command::CommandOutput::into_stdout_bytes)
         .map_err(|source| GitProbeFailure::CommandFailed {
             probe,
             failure: CommandFailure::from(&source),
@@ -236,17 +256,17 @@ fn guard_against_filter(
     project_dir: &Utf8Path,
 ) -> Result<(), GitProbeFailure> {
     let probe = GitProbe::FilterPreflight;
-    let tracked_paths = run_probe(runner, project_dir, probe, ["ls-files", "-z"])?;
+    let tracked_paths = run_probe_bytes(runner, project_dir, probe, ["ls-files", "-z"])?;
     let paths = tracked_paths
-        .split('\0')
+        .split(|byte| *byte == b'\0')
         .filter(|path| !path.is_empty())
         .collect::<Vec<_>>();
     for batch in paths.chunks(FILTER_ATTRIBUTE_BATCH) {
         let args = ["check-attr", "-z", "filter", "--"]
             .into_iter()
-            .map(str::to_owned)
-            .chain(batch.iter().map(|path| (*path).to_owned()));
-        let output = run_probe(runner, project_dir, probe, args)?;
+            .map(OsString::from)
+            .chain(batch.iter().map(|path| OsString::from_vec(path.to_vec())));
+        let output = run_probe_bytes(runner, project_dir, probe, args)?;
         if filter_is_selected(&output).map_err(|()| GitProbeFailure::MalformedOutput { probe })? {
             return Err(GitProbeFailure::FilterConfigured {
                 probe: GitProbe::WorktreeStatus,
@@ -257,14 +277,18 @@ fn guard_against_filter(
 }
 
 /// Report whether a NUL-delimited `git check-attr -z` response selects a filter.
-fn filter_is_selected(output: &str) -> Result<bool, ()> {
-    let fields = output.split_terminator('\0').collect::<Vec<_>>();
+fn filter_is_selected(output: &[u8]) -> Result<bool, ()> {
+    let fields = output
+        .strip_suffix(b"\0")
+        .unwrap_or(output)
+        .split(|byte| *byte == b'\0')
+        .collect::<Vec<_>>();
     let mut records = fields.chunks_exact(3);
     if !records.remainder().is_empty() {
         return Err(());
     }
     Ok(records.any(
-        |record| matches!(record, [_, "filter", value] if !matches!(*value, "unspecified" | "unset")),
+        |record| matches!(record, [_, b"filter", value] if !matches!(*value, b"unspecified" | b"unset")),
     ))
 }
 

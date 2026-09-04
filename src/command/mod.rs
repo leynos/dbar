@@ -29,6 +29,7 @@ compile_error!(
      would silently drop a guarantee the code claims to provide"
 );
 
+use std::ffi::OsString;
 use std::fmt;
 use std::process::Command;
 use std::time::Duration;
@@ -62,7 +63,7 @@ const DEFAULT_MAX_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 /// A command specification used by probes.
 pub struct CommandSpec {
     program: String,
-    args: Vec<String>,
+    args: Vec<OsString>,
     cwd: Option<Utf8PathBuf>,
     timeout: Option<Duration>,
     max_output_bytes: Option<usize>,
@@ -93,7 +94,7 @@ impl CommandSpec {
     /// ```text
     /// let spec = CommandSpec::new("git").args(["status", "--porcelain"]);
     /// ```
-    pub fn args(mut self, args: impl IntoIterator<Item = impl Into<String>>) -> Self {
+    pub fn args(mut self, args: impl IntoIterator<Item = impl Into<OsString>>) -> Self {
         self.args = args.into_iter().map(Into::into).collect();
         self
     }
@@ -144,6 +145,34 @@ impl CommandSpec {
 pub struct CommandOutput {
     /// The stdout payload captured from the command.
     pub stdout: String,
+    /// The original stdout bytes, retained for protocols that transport paths.
+    stdout_bytes: Vec<u8>,
+}
+
+impl CommandOutput {
+    /// Build captured output from UTF-8 text for command-runner test doubles.
+    #[cfg(test)]
+    pub(crate) fn from_stdout(text: impl Into<String>) -> Self {
+        let stdout = text.into();
+        Self {
+            stdout_bytes: stdout.as_bytes().to_vec(),
+            stdout,
+        }
+    }
+
+    /// Build captured output from arbitrary bytes without changing them.
+    pub(crate) fn from_bytes(stdout_bytes: Vec<u8>) -> Self {
+        let stdout = String::from_utf8_lossy(&stdout_bytes).trim().to_owned();
+        Self {
+            stdout,
+            stdout_bytes,
+        }
+    }
+
+    /// Consume the output while retaining every stdout byte.
+    pub(crate) fn into_stdout_bytes(self) -> Vec<u8> {
+        self.stdout_bytes
+    }
 }
 
 #[derive(Debug, Error)]
@@ -294,8 +323,7 @@ impl CommandRunner for RealCommandRunner {
                 status: status.code(),
             });
         }
-        let stdout = String::from_utf8_lossy(&stdout_bytes).trim().to_owned();
-        Ok(CommandOutput { stdout })
+        Ok(CommandOutput::from_bytes(stdout_bytes))
     }
 }
 

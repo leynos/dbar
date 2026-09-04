@@ -34,7 +34,10 @@ entry points invoked from `main`: `run_status`, `run_refresh`, and
   missing repository apart from a failed or unparsable probe; `GitStatusReport`
   carries the `GitStatus` snapshot alongside any field-level `GitProbeFailure`s
   the fallback policy absorbed. See the module's fallback-policy table for what
-  each outcome renders.
+  each outcome renders. Before running `git status`, the worktree probe
+  preflights tracked paths with `git check-attr`; if repository attributes
+  select a filter, or the preflight cannot complete, the status probe is
+  skipped so repository-controlled filter commands are not executed.
 - `github/mod.rs` — the `GitHubClient` trait and its two implementations,
   `GhCliClient` (backed by the `gh` CLI via `CommandRunner`) and
   `MockGitHubClient` (a fixed value, wired up when `--github-mock-pr` is
@@ -49,7 +52,8 @@ entry points invoked from `main`: `run_status`, `run_refresh`, and
 - `cache/mod.rs` — resolves the XDG cache directory (via `directories`) and
   performs TTL-checked reads and atomic temp-file-then-rename writes of cached
   PR lookups, plus the bounded retention sweep described under "Cache
-  retention" below.
+  retention" below. `CacheReader` is the read-only port used by status;
+  `CacheStorage` adds the sweep and write operations reserved for refresh.
 - `status/mod.rs` — `build_status_report` orchestrates a single, cache-only
   status line: it receives the already-resolved project directory, probes git,
   reads a fresh PR value when present, resolves tmux context, renders the clock
@@ -159,17 +163,16 @@ branch a checkout has ever had, including branches long since deleted.
 Expiry is judged from the entry's recorded timestamp rather than from file
 metadata, so an entry another dbar process has just refreshed reads as fresh. A
 file that vanishes between the listing and the removal counts as success:
-another process reclaimed it first. Any other removal failure is returned as
-`CacheError::Retention` in place of the `Ok(None)` the expiry would otherwise
-have produced, so the caller can log it and carry on with a fresh lookup rather
-than the failure being discarded silently.
+another process reclaimed it first. Any other removal failure is reported as a
+retention-sweep failure alongside the current lookup result. The caller can log
+it and carry on with a fresh lookup without discarding a usable status value.
 
 ## Dependency-injection seams
 
 `dbar` shells out to `git`, `gh`, and `tmux`, and reads the wall clock. Tests
 must exercise the parsing and orchestration logic without invoking real
-processes or mutating the environment, so two trait boundaries carry all
-external process interaction, and the `mockable` crate's `Clock` trait carries
+processes or mutating the environment, so trait boundaries carry external
+process and cache interaction, and the `mockable` crate's `Clock` trait carries
 time:
 
 - `command::CommandRunner` —
@@ -188,7 +191,12 @@ time:
   `src/status/tests.rs`, whose `Reply::Failure` variant stands in for a network
   or rate-limit error).
 
-Both traits exist so unit and behavioural tests stay hermetic: no test needs
+- `cache::CacheReader` and `cache::CacheStorage` — the read-only port used by
+  `status` and the read/write port reserved for `refresh`, respectively.
+  `FileCacheStorage` is constructed at the CLI composition boundary, so the
+  status policy does not depend on the filesystem adapter.
+
+These traits exist so unit and behavioural tests stay hermetic: no test needs
 network access, a real `git`/`gh`/`tmux` binary, or environment-variable
 mutation to exercise the orchestration logic in `git/mod.rs`, `tmux/mod.rs`, and
 `status/mod.rs`.

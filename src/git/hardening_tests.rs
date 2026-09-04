@@ -21,11 +21,15 @@
 //! one, so a developer's own configuration cannot reach the fixture and the
 //! tests need no serialization.
 
+use std::ffi::OsStr;
 use std::io;
+use std::os::unix::ffi::OsStrExt as _;
+use std::path::Path;
 use std::process::Command;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::ambient_authority;
+use cap_std::fs::Dir as RawDir;
 use cap_std::fs_utf8::{Dir, Permissions, PermissionsExt as _};
 use rstest::rstest;
 use tempfile::TempDir;
@@ -39,6 +43,9 @@ const MARKER: &str = "executed";
 
 /// The tracked file whose stat information the probes refresh.
 const TRACKED: &str = "tracked.txt";
+
+/// A tracked path whose invalid UTF-8 must reach Git without replacement.
+const NON_UTF8_TRACKED: &[u8] = b"tracked-\xff.txt";
 
 /// The directory an armed `core.hooksPath` points at.
 const HOOKS: &str = "hooks";
@@ -121,6 +128,22 @@ impl HostileRepo {
         )
     }
 
+    /// Configure a filter selected only by an invalid-UTF-8 tracked pathname.
+    fn arm_non_utf8_filter(&self) -> io::Result<()> {
+        write_raw_file(&self.repo, NON_UTF8_TRACKED, b"contents\n")?;
+        let mut attributes = NON_UTF8_TRACKED.to_vec();
+        attributes.extend(b" filter=hostile\n");
+        write_raw_file(&self.repo, b".gitattributes", &attributes)?;
+        // Stage the path before installing its filter: `git add` itself
+        // performs a clean conversion when the filter is configured.
+        run_git(&self.repo, &["add", "--all"])?;
+        let command = self.injected_command();
+        run_git(
+            &self.repo,
+            &["config", "filter.hostile.clean", &format!("{command}; cat")],
+        )
+    }
+
     /// Rewrite the tracked file so its stat information no longer matches the
     /// index, which is what makes the next `git status` refresh and rewrite it.
     ///
@@ -128,6 +151,11 @@ impl HostileRepo {
     /// probes report are unaffected.
     fn restat(&self) -> io::Result<()> {
         write_file(&self.repo, TRACKED, "contents\n")
+    }
+
+    /// Rewrite the invalid-UTF-8 fixture path after it has been added.
+    fn restat_non_utf8(&self) -> io::Result<()> {
+        write_raw_file(&self.repo, NON_UTF8_TRACKED, b"contents\n")
     }
 
     /// Whether the injected command ran.
@@ -144,6 +172,12 @@ fn open_dir(path: &Utf8Path) -> io::Result<Dir> {
 /// Write a fixture file through `cap_std`.
 fn write_file(dir: &Utf8Path, name: &str, contents: &str) -> io::Result<()> {
     open_dir(dir)?.write(name, contents)
+}
+
+/// Write a fixture file whose name or contents need not be valid UTF-8.
+fn write_raw_file(dir: &Utf8Path, name: &[u8], contents: &[u8]) -> io::Result<()> {
+    RawDir::open_ambient_dir(dir, ambient_authority())?
+        .write(Path::new(OsStr::from_bytes(name)), contents)
 }
 
 /// Run one `git` invocation while building the fixture.
@@ -258,5 +292,41 @@ fn probing_skips_a_worktree_status_with_an_executable_filter() {
     assert!(
         fixture.fired(),
         "the fixture must still prove that an unhardened status invokes the filter"
+    );
+}
+
+#[rstest]
+fn probing_skips_a_filter_selected_by_a_non_utf8_tracked_path() {
+    let fixture = HostileRepo::new().expect("build the hostile fixture");
+    fixture
+        .arm_non_utf8_filter()
+        .expect("arm the non-UTF-8 attribute filter");
+
+    let outcome = git_status(&RealCommandRunner, &fixture.repo);
+
+    assert!(
+        !fixture.fired(),
+        "the raw tracked pathname must select the filter before status can run it"
+    );
+    let GitStatusOutcome::Available(report) = outcome else {
+        panic!("the safe probes should still produce a git report");
+    };
+    assert!(report.degradations.iter().any(|failure| matches!(
+        failure,
+        super::GitProbeFailure::FilterConfigured {
+            probe: super::GitProbe::WorktreeStatus,
+        }
+    )));
+
+    fixture
+        .restat_non_utf8()
+        .expect("restat the non-UTF-8 tracked file");
+    let unhardened = CommandSpec::new("git")
+        .args(["status", "--porcelain"])
+        .cwd(fixture.repo.clone());
+    drop(RealCommandRunner.run(&unhardened));
+    assert!(
+        fixture.fired(),
+        "the fixture must prove that the non-UTF-8 filter remains executable"
     );
 }
