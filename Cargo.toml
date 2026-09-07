@@ -8,7 +8,7 @@ camino = { version = "1.2.2", features = ["serde1"] }
 cap-std = { version = "4.0.0", features = ["fs_utf8"] }
 clap = { version = "4.5.54", features = ["derive"] }
 directories = "6.0.0"
-mockable = { version = "0.1.4", default-features = false, features = ["clock", "mock"] }
+mockable = { version = "3.0.0", default-features = false, features = ["clock", "mock"] }
 ortho_config = "0.9.0"
 rustix = { version = "1.1.4", features = ["process", "fs"] }
 serde = { version = "1.0.228", features = ["derive"] }
