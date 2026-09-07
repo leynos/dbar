@@ -15,7 +15,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@3439e8012bb18c6d8f5cc45f9fe425393e5f8ed6
+        uses: leynos/shared-actions/.github/actions/setup-rust@824724a791a7f6dfef79bf95e11ea744b6eb4de4
       - name: Verify non-Unix builds are rejected
         run: |
           rustup target add x86_64-pc-windows-gnu
@@ -38,7 +38,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@3439e8012bb18c6d8f5cc45f9fe425393e5f8ed6
+        uses: leynos/shared-actions/.github/actions/setup-rust@824724a791a7f6dfef79bf95e11ea744b6eb4de4
       - name: Setup uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
       - name: Format
@@ -71,7 +71,7 @@ jobs:
       - name: Lint
         run: make lint
       - name: Test and Measure Coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@3439e8012bb18c6d8f5cc45f9fe425393e5f8ed6
+        uses: leynos/shared-actions/.github/actions/generate-coverage@824724a791a7f6dfef79bf95e11ea744b6eb4de4
         with:
           output-path: lcov.info
           format: lcov
@@ -79,7 +79,7 @@ jobs:
         env:
           CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
         if: ${{ env.CS_ACCESS_TOKEN }}
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@3439e8012bb18c6d8f5cc45f9fe425393e5f8ed6
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@824724a791a7f6dfef79bf95e11ea744b6eb4de4
         with:
           format: lcov
           access-token: ${{ env.CS_ACCESS_TOKEN }}
