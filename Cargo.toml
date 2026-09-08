@@ -25,7 +25,7 @@ mockall = "0.15.0"
 proptest = "1.9.0"
 rstest = "0.26.1"
 rstest-bdd = "0.3.2"
-rstest-bdd-macros = "0.3.2"
+rstest-bdd-macros = "0.5.0"
 tempfile = "3.24.0"
 
 [lints.clippy]
