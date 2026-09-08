@@ -1086,9 +1086,9 @@ dependencies = [
 
 [[package]]
 name = "mockable"
-version = "0.1.4"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e54ab86571e818ddc6b7c5bf511c7850d6680a4a80551f0e0dc786971d2ab289"
+checksum = "696033a748f67c97f2169b29b428fbab0d12317707cede1ca62fcb786e80b7fe"
 dependencies = [
  "chrono",
  "mockall 0.11.4",
