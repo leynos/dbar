@@ -25,7 +25,7 @@ const fn expected_format(field: TmuxField) -> &'static str {
 }
 
 /// The `display-message` invocation a field must produce, built from the
-/// hand-written literal rather than from `field_spec`.
+/// handwritten literal rather than from `field_spec`.
 fn expected_spec(field: TmuxField) -> CommandSpec {
     CommandSpec::new("tmux").args(["display-message", "-p", expected_format(field)])
 }
@@ -59,7 +59,7 @@ fn query_failure() -> CommandError {
 /// Each field gets its own `expect_run` keyed by an `eq` matcher on the exact
 /// specification, so a query for the wrong format string matches nothing and
 /// fails the test rather than being silently answered. The specification comes
-/// from [`expected_spec`], which is built from hand-written literals, so these
+/// from [`expected_spec`], which is built from handwritten literals, so these
 /// resolution tests fail on a production format typo instead of following it.
 struct Answers(Vec<(TmuxField, Option<String>)>);
 

@@ -1,5 +1,5 @@
 .PHONY: help all clean test build release lint fmt check-fmt typecheck markdownlint \
-	spelling spelling-helper-test nixie
+	spelling nixie
 
 
 TARGET ?= dbar
@@ -21,8 +21,10 @@ MDTABLEFIX_SELECT = --git --include-untracked
 MDTABLEFIX_RULES = --wrap --renumber --breaks --ellipsis --fences
 NIXIE ?= nixie
 WHITAKER ?= whitaker
-TYPOS_VERSION ?= 1.48.0
-TYPOS := uv tool run typos@$(TYPOS_VERSION)
+TYPOS_CONFIG_BUILDER_VERSION ?= v0.1.1
+TYPOS_CONFIG_BUILDER = uv tool run --from \
+	"git+https://github.com/leynos/typos-config-builder.git@$(TYPOS_CONFIG_BUILDER_VERSION)" \
+	typos-config-builder
 
 build: target/debug/$(TARGET) ## Build debug binary
 release: target/release/$(TARGET) ## Build release binary
@@ -31,7 +33,6 @@ all: check-fmt lint test ## Perform a comprehensive check of code
 
 clean: ## Remove build artifacts
 	$(CARGO) clean
-	rm -rf .coverage .pytest_cache scripts/__pycache__ scripts/tests/__pycache__
 	rm -f .typos-oxendict-base.json .typos-oxendict-base.toml
 
 test: ## Run tests with warnings treated as errors
@@ -62,17 +63,8 @@ markdownlint: ## Lint Markdown files
 	$(MDLINT) '**/*.md'
 	+$(MAKE) spelling
 
-spelling: spelling-helper-test ## Enforce en-GB-oxendict spelling in Markdown prose
-	@uv run scripts/generate_typos_config.py
-	@git ls-files -z '*.md' | \
-		xargs -0 -r $(TYPOS) --config typos.toml --force-exclude
-
-spelling-helper-test: ## Validate the shared spelling-policy integration
-	@PYTHONPATH=scripts uv run --python 3.13 \
-		--with pytest==9.0.2 --with pytest-cov==7.0.0 \
-		python -m pytest scripts/tests/test_typos_rollout.py \
-		--cov=generate_typos_config --cov=typos_rollout \
-		--cov=typos_rollout_cache --cov-fail-under=90
+spelling: ## Enforce en-GB-oxendict spelling
+	$(TYPOS_CONFIG_BUILDER) gate --repository .
 
 nixie: ## Validate Mermaid diagrams
 	$(NIXIE) --no-sandbox
