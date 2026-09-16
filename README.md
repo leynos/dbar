@@ -24,10 +24,10 @@ dbar builds and runs on Unix only, and says so at compile time rather than
 building into something that misbehaves. It relies on POSIX process groups to
 stop a probe's descendants outliving it, on `flock` to serialize concurrent
 installations against each other, and on writing to a temporary file and
-renaming it over the destination to make each replacement atomic for a
-reader; none of these has a portable equivalent here, and stubbing them would
-mean claiming a mutual exclusion and an atomicity that were never happening.
-tmux itself is a Unix tool, so nothing is lost in practice.
+renaming it over the destination to make each replacement atomic for a reader;
+none of these has a portable equivalent here, and stubbing them would mean
+claiming a mutual exclusion and an atomicity that were never happening. tmux
+itself is a Unix tool, so nothing is lost in practice.
 
 Render a status line directly:
 

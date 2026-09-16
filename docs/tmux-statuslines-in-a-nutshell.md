@@ -20,8 +20,8 @@ Think of the status line as a string that tmux *renders*.
 - tmux applies **styles** like `#[fg=…,bg=…,bold]`.
 - tmux runs **commands** like `#(~/bin/status)` and inserts their output.
 
-The “protocol” for an external command is simply: **print the status text
-to display**, optionally including tmux style tags.
+The “protocol” for an external command is simply: **print the status text to
+display**, optionally including tmux style tags.
 
 ______________________________________________________________________
 
@@ -48,16 +48,15 @@ set -g status-right '#(~/bin/tmux-ok)'
 
 ### “Which line gets used?”
 
-Treat it as “tmux inserts the last line the command prints”. In practice:
-print a single line and no further thought is required.
+Treat it as “tmux inserts the last line the command prints”. In practice: print
+a single line and no further thought is required.
 
 ### What tmux passes to the command
 
 tmux runs the command via `/bin/sh`.
 
-Important nuance: it **does not run inside the pane**. Pane-scoped
-environment variables like `TMUX_PANE` should not be assumed to be
-available.
+Important nuance: it **does not run inside the pane**. Pane-scoped environment
+variables like `TMUX_PANE` should not be assumed to be available.
 
 Context (session/window/pane/client) can be obtained using two reliable
 patterns:
@@ -192,8 +191,7 @@ Powerline’s look comes from two ideas:
 
 1. **Segments** with a background colour
 2. **A separator glyph** whose foreground matches the preceding segment’s
-   background, and whose background matches the following segment’s
-   background
+   background, and whose background matches the following segment’s background
 
 A typical separator glyph is `` (requires a nerd-font/powerline-capable font).
 
@@ -265,16 +263,16 @@ ______________________________________________________________________
 
 ## Hooks: refreshing when tmux state changes
 
-Polling every N seconds is fine for clocks, but immediate refresh may be
-wanted when tmux state changes.
+Polling every N seconds is fine for clocks, but immediate refresh may be wanted
+when tmux state changes.
 
 tmux supports “hooks” that run commands on events. A common pattern is:
 
 - hook runs the update action (write a cache file, etc.)
 - hook runs `tmux refresh-client -S`
 
-For heavy work, avoid doing it directly in the hook; have the hook nudge
-the daemon.
+For heavy work, avoid doing it directly in the hook; have the hook nudge the
+daemon.
 
 ______________________________________________________________________
 
@@ -287,14 +285,12 @@ Powerline-patched fonts) and configure the terminal to use it.
 
 ### Quoting
 
-When `#{…}` formats are passed into `#(…)` as arguments, they should be
-quoted using tmux’s shell-quoting modifier, `#{q:…}`. Bare double quotes are
-not enough: command substitution still runs inside them, so a session,
-window, or pane name containing shell metacharacters remains a
-shell-injection risk.
+When `#{…}` formats are passed into `#(…)` as arguments, they should be quoted
+using tmux’s shell-quoting modifier, `#{q:…}`. Bare double quotes are not
+enough: command substitution still runs inside them, so a session, window, or
+pane name containing shell metacharacters remains a shell-injection risk.
 
-Insecure — a session name containing shell metacharacters can inject
-commands:
+Insecure — a session name containing shell metacharacters can inject commands:
 
 ```tmux
 set -g status-right '#(~/bin/seg #{session_name})'
