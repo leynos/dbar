@@ -58,9 +58,8 @@ in tmux via `#(dbar)` and all specified tests pass.
 ## Risks
 
 - Risk: tmux does not render ANSI colour escape codes consistently.
-  Severity: medium Likelihood: medium Mitigation: emit tmux
-  `#[fg=colourNN]`/`#[bg=colourNN]` styling using the same 256-colour palette
-  as `claude-status`.
+  Severity: medium Likelihood: medium Mitigation: emit tmux `#[fg=colourNN]`/
+  `#[bg=colourNN]` styling using the same 256-colour palette as `claude-status`.
 
 - Risk: `gh` or `git` commands are unavailable or slow in status refresh.
   Severity: medium Likelihood: medium Mitigation: treat command failures as
@@ -126,11 +125,11 @@ in tmux via `#(dbar)` and all specified tests pass.
 
 - Observation: rebasing onto `origin/main` applied two new commits
   (`dependabot-automerge` rollout and the cooldown fix), neither of which
-  touched the same lines as the implementation branch. Evidence: `git rebase
-  origin/main` completed without conflicts. Impact: pick up the new shared
-  Dependabot workflow automatically and inherit the `cooldown` policy; the
-  branch rebuilds `Cargo.lock` against the merged `Cargo.toml` and keeps the
-  lock file tracked so reproducible builds stay available.
+  touched the same lines as the implementation branch. Evidence:
+  `git rebase origin/main` completed without conflicts. Impact: pick up the new
+  shared Dependabot workflow automatically and inherit the `cooldown` policy;
+  the branch rebuilds `Cargo.lock` against the merged `Cargo.toml` and keeps
+  the lock file tracked so reproducible builds stay available.
 
 ## Decision log
 
@@ -164,10 +163,9 @@ in tmux via `#(dbar)` and all specified tests pass.
 - Decision: track `Cargo.lock` and rebuild it after the rebase. Rationale:
   after rebasing onto `origin/main`, the `Cargo.toml` dependencies are
   inherited from the branch implementation; track `Cargo.lock` so dependency
-  resolutions stay reproducible for reviewers and CI, and regenerate the
-  lock against the merged `Cargo.toml` via `cargo generate-lockfile` so the
-  committed lock reflects the post-rebase state. Date/Author: 2026-07-08 /
-  Codex
+  resolutions stay reproducible for reviewers and CI, and regenerate the lock
+  against the merged `Cargo.toml` via `cargo generate-lockfile` so the
+  committed lock reflects the post-rebase state. Date/Author: 2026-07-08 / Codex
 
 ## Outcomes & retrospective
 
@@ -178,25 +176,25 @@ validated formatting, linting, and tests. Next time, scaffold integration test
 crate roots earlier to avoid missing coverage during initial test runs.
 
 Followed up with a rebase onto `origin/main` so the branch inherits the new
-`dependabot-automerge` workflow and the cooler-aware `dependabot.yml`.
-Validated `make check-fmt`, `make lint`, and `make test` after the rebase.
-The lock file is now kept under version control and was regenerated against
-the merged `Cargo.toml` so the committed `Cargo.lock` matches the
-post-rebase dependency set.
+`dependabot-automerge` workflow and the cooler-aware `dependabot.yml`. Validated
+`make check-fmt`, `make lint`, and `make test` after the rebase. The lock file
+is now kept under version control and was regenerated against the merged
+`Cargo.toml` so the committed `Cargo.lock` matches the post-rebase dependency
+set.
 
 ## Context and orientation
 
-At the start of this work, the repository contained a single binary with a
-stub `main` in `src/main.rs` and no existing modules or tests; see
+At the start of this work, the repository contained a single binary with a stub
+`main` in `src/main.rs` and no existing modules or tests; see
 `Interfaces and dependencies` for the modules and tests delivered instead. The
 aesthetic reference script `~/.local/bin/claude-status` defines glyphs, a
 256-colour palette, and segment ordering; it also contains project naming and
 git parsing logic that must be mirrored. The tmux status line protocol and
-quoting guidance live in
-`docs/tmux-statuslines-in-a-nutshell.md`. The configuration system should use
-`ortho_config` as documented in `docs/ortho-config-users-guide.md`. Behavioural
-test patterns are in `docs/rstest-bdd-users-guide.md`, and dependency-injection
-expectations are in `docs/reliable-testing-in-rust-via-dependency-injection.md`.
+quoting guidance live in `docs/tmux-statuslines-in-a-nutshell.md`. The
+configuration system should use `ortho_config` as documented in
+`docs/ortho-config-users-guide.md`. Behavioural test patterns are in
+`docs/rstest-bdd-users-guide.md`, and dependency-injection expectations are in
+`docs/reliable-testing-in-rust-via-dependency-injection.md`.
 
 ## Plan of work
 
@@ -329,78 +327,76 @@ Example status output (illustrative; exact values depend on repo state):
 
 ## Interfaces and dependencies
 
-The plan is COMPLETE; the interfaces below reflect what was delivered, not
-the speculative names drafted before implementation began. Every `mod`
-declaration in `src/lib.rs` is private, so none of the module paths below
-are reachable from outside the crate; they describe the internal seams
-used to assemble `dbar::run()`. The only public surface is `dbar::run()`
-and the re-exported `dbar::DbarError`.
+The plan is COMPLETE; the interfaces below reflect what was delivered, not the
+speculative names drafted before implementation began. Every `mod` declaration
+in `src/lib.rs` is private, so none of the module paths below are reachable
+from outside the crate; they describe the internal seams used to assemble
+`dbar::run()`. The only public surface is `dbar::run()` and the re-exported
+`dbar::DbarError`.
 
 Delivered internal interfaces:
 
 - `config::StatusArgs` / `config::InstallArgs`:
-  `#[derive(OrthoConfig)]` structs parsed by `clap` and merged from CLI/env
-  by `ortho_config`, covering `project_dir`, `client_width`, `session`,
-  `window`, `pane`, `socket`, `show_pr`, `show_clock`, `clock_format`,
-  `github_mock_pr`, `pr_cache_ttl_seconds`, and `cache_dir` (status), and
-  `path`, `dry_run`, `full`, and `position` (install).
-  `config::load_command() -> Result<DbarCommand, ConfigError>`
-  parses and merges the selected subcommand, where `ConfigError` has three
-  variants: `Cli(Box<clap::Error>)` for invalid command-line arguments,
-  `Merge(Arc<ortho_config::OrthoError>)` for environment/config-file
-  merge failures, and `InvalidClockFormat(String)` for a `clock_format`
-  value chrono cannot render.
-- `status::build_status_report(args: &StatusArgs, project_dir: &Utf8Path,
-  dependencies: &StatusDependencies<'_>) ->
-  Result<StatusReport, DbarError>`: assembles and returns a `StatusReport`
-  holding the rendered `line` and a `StatusDiagnostics` value recording
-  every absorbed probe failure; there is no separate `StatusContext` type.
+  `#[derive(OrthoConfig)]` structs parsed by `clap` and merged from CLI/env by
+  `ortho_config`, covering `project_dir`, `client_width`, `session`, `window`,
+  `pane`, `socket`, `show_pr`, `show_clock`, `clock_format`, `github_mock_pr`,
+  `pr_cache_ttl_seconds`, and `cache_dir` (status), and `path`, `dry_run`,
+  `full`, and `position` (install).
+  `config::load_command() -> Result<DbarCommand, ConfigError>` parses and
+  merges the selected subcommand, where `ConfigError` has three variants:
+  `Cli(Box<clap::Error>)` for invalid command-line arguments,
+  `Merge(Arc<ortho_config::OrthoError>)` for environment/config-file merge
+  failures, and `InvalidClockFormat(String)` for a `clock_format` value chrono
+  cannot render.
+- `status::build_status_report(args, project_dir, dependencies)`: takes
+  `&StatusArgs`, `&Utf8Path`, and `&StatusDependencies<'_>`, and returns
+  `Result<StatusReport, DbarError>`. It assembles and returns a `StatusReport`
+  holding the rendered `line` and a `StatusDiagnostics` value recording every
+  absorbed probe failure; there is no separate `StatusContext` type.
 - `command::CommandRunner`: trait executing a `CommandSpec` and
-  returning a `CommandOutput`, implemented by `RealCommandRunner`. This
-  seam was not anticipated in the original plan; `git`, `tmux`, and GitHub
-  probing all depend on it for hermetic testing.
+  returning a `CommandOutput`, implemented by `RealCommandRunner`. This seam
+  was not anticipated in the original plan; `git`, `tmux`, and GitHub probing
+  all depend on it for hermetic testing.
 - `git::project_name` / `git::git_status`: free functions that
   read branch, dirty/staged state, upstream counts, and worktree detection
   through a `&dyn CommandRunner`; there is no `GitProbe` trait.
-- `tmux::resolve_context(runner: &dyn CommandRunner, context:
-  TmuxContext) -> TmuxResolution`: free function that fills in missing
-  session/window/pane/socket fields from `tmux display-message` output and
-  returns a `TmuxResolution` holding the resolved `context` and an
-  `outcome` recording what happened; there is no `TmuxProbe` trait.
+- `tmux::resolve_context(runner: &dyn CommandRunner, context: TmuxContext) -> TmuxResolution`:
+  free function that fills in missing session/window/pane/socket fields from
+  `tmux display-message` output and returns a `TmuxResolution` holding the
+  resolved `context` and an `outcome` recording what happened; there is no
+  `TmuxProbe` trait.
 - `render::render_status_line(context: &RenderContext) -> String`:
-  renderer that applies the `claude-status` palette and glyphs and emits
-  tmux `#[fg=colourNN]`/`#[bg=colourNN]` styling.
-- `install::install(path: Option<Utf8PathBuf>, position:
-  StatusPosition, mode: RunMode, width: Width) -> Result<InstallOutcome,
-  InstallError>`: free function that writes a marker-delimited tmux
-  snippet and returns a summary of changes; there is no `TmuxInstaller`
-  type. `RunMode` (`DryRun`/`Write`) and `Width` (`Full`/`Plain`) replaced
-  the originally planned `dry_run: bool, full: bool` pair, because two
-  adjacent booleans of the same type can be transposed without the
+  renderer that applies the `claude-status` palette and glyphs and emits tmux
+  `#[fg=colourNN]`/`#[bg=colourNN]` styling.
+- `install::install(path, position, mode, width)`: takes
+  `Option<Utf8PathBuf>`, `StatusPosition`, `RunMode`, and `Width`, and returns
+  `Result<InstallOutcome, InstallError>`. A free function that writes a
+  marker-delimited tmux snippet and returns a summary of changes; there is no
+  `TmuxInstaller` type. `RunMode` (`DryRun`/ `Write`) and `Width` (`Full`/
+  `Plain`) replaced the originally planned `dry_run: bool, full: bool` pair,
+  because two adjacent booleans of the same type can be transposed without the
   compiler noticing, and transposing these two would turn a preview into a
   write of the wrong variant.
 - `cache::{CacheReader, CacheWriter, CacheStorage}`: ports separating the
   read-only status query from the refresh operation's retention and write
   capabilities. `FileCacheStorage` implements all three ports at the CLI
   composition boundary.
-- `cache::{resolve_cache_dir, load_cached_value,
-  store_cached_value}`: helpers that resolve the XDG cache path and manage
-  cached lookup files, as planned.
+- `cache::{resolve_cache_dir, load_cached_value, store_cached_value}`: helpers
+  that resolve the XDG cache path and manage cached lookup files, as planned.
 - `github::GitHubClient`: trait for PR lookup, implemented by
   `GhCliClient` (backed by the `gh` CLI via `CommandRunner`) and
-  `MockGitHubClient` (a fixed value, wired up via `--github-mock-pr`).
-  Like `CommandRunner`, this seam was not anticipated in the original
-  plan.
+  `MockGitHubClient` (a fixed value, wired up via `--github-mock-pr`). Like
+  `CommandRunner`, this seam was not anticipated in the original plan.
 
 Delivered dependencies:
 
 - runtime: `ortho_config`, `serde`, `serde_json`, `camino`, `cap-std`,
-  `thiserror`, `directories`, `mockable`, `clap`, `rustix`,
-  `unicode-width`, `wait-timeout`
+  `thiserror`, `directories`, `mockable`, `clap`, `rustix`, `unicode-width`,
+  `wait-timeout`
 - dev: `rstest`, `rstest-bdd`, `rstest-bdd-macros`, `assert_cmd`, `chrono`,
-  `insta`, `tempfile`, `mockall` (mandatory for the
-  `CommandRunner`/`GitHubClient` seams, not an optional convenience), and
-  `proptest` (property tests)
+  `insta`, `tempfile`, `mockall` (mandatory for the `CommandRunner`/
+  `GitHubClient` seams, not an optional convenience), and `proptest` (property
+  tests)
 
 ## Revision note (required when editing an ExecPlan)
 
@@ -424,34 +420,34 @@ Revised 2026-01-05 to mark the plan complete with final outcomes.
 Revised 2026-01-05 to document the pane current path update.
 
 Revised 2026-08-01 to correct "Interfaces and dependencies" so it lists the
-delivered `CommandRunner`/`GitHubClient` interfaces, free-function probing
-API, and full runtime dependency list, replacing speculative interface
-names (`DbarConfig`, `StatusContext`/`StatusLine`, `GitProbe`, `TmuxProbe`,
+delivered `CommandRunner`/`GitHubClient` interfaces, free-function probing API,
+and full runtime dependency list, replacing speculative interface names
+(`DbarConfig`, `StatusContext`/`StatusLine`, `GitProbe`, `TmuxProbe`,
 `TmuxInstaller`) that were never implemented.
 
 Revised 2026-08-14 to correct `config::load_command`'s error type from
 `Arc<OrthoError>` to `ConfigError` (with its `Cli`, `Merge` and
-`InvalidClockFormat(String)` variants), and to drop the `dbar::`
-module-path prefix from "Interfaces and dependencies" since every module
-in `src/lib.rs` is declared with a private `mod`; the only public crate
-surface is `dbar::run()` and the re-exported `dbar::DbarError`.
+`InvalidClockFormat(String)` variants), and to drop the `dbar::` module-path
+prefix from "Interfaces and dependencies" since every module in `src/lib.rs` is
+declared with a private `mod`; the only public crate surface is `dbar::run()`
+and the re-exported `dbar::DbarError`.
 
 Revised 2026-08-22 to add `mockall` and `proptest` to the delivered
 dev-dependency list, which had omitted them.
 
 Revised 2026-08-31 to record the final process-group coordination design:
-`SignalClaim` owns the shared, mutex-protected signal state between the
-bounded readers and `ChildSession`; readers cannot signal after a reap, while
-the session may spend one post-reap signal to evict descendants that still
-hold captured pipes open. The implementation and developer documentation now
-record the `Unsignalled`, `Signalled`, `Reaped`, and `Sealed` transitions and
-the rule that a failed signal restores the previous state.
+`SignalClaim` owns the shared, mutex-protected signal state between the bounded
+readers and `ChildSession`; readers cannot signal after a reap, while the
+session may spend one post-reap signal to evict descendants that still hold
+captured pipes open. The implementation and developer documentation now record
+the `Unsignalled`, `Signalled`, `Reaped`, and `Sealed` transitions and the rule
+that a failed signal restores the previous state.
 
-Revised 2026-08-31 to align the delivered development dependency inventory
-with `Cargo.toml`, including `chrono` for deterministic timestamp fixtures,
-and to document the `make typecheck` gate and atomic install wording in the
-developer guide.
+Revised 2026-08-31 to align the delivered development dependency inventory with
+`Cargo.toml`, including `chrono` for deterministic timestamp fixtures, and to
+document the `make typecheck` gate and atomic install wording in the developer
+guide.
 
-Revised 2026-09-04 to document the cache read/write ports, the explicit
-refresh retention boundary, and the Git filter preflight that prevents
+Revised 2026-09-04 to document the cache read/write ports, the explicit refresh
+retention boundary, and the Git filter preflight that prevents
 repository-controlled filters from running during status probes.

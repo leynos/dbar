@@ -78,14 +78,13 @@ entry points invoked from `main`: `run_status`, `run_refresh`, and
   `BehindCount`, `PrNumber`, `CacheTtlSeconds`, `StatusPosition`) that avoid
   passing bare `String`/integer values between modules.
 - `install/mod.rs` — `install` accepts a configuration path, position, run
-  mode, and width, then inserts or updates a marker-delimited tmux snippet in
-  a configuration file. It backs up the previous contents before replacing the
-  target atomically:
-  the new contents are written to a uniquely named temporary file, which
-  inherits the target's permissions, then renamed over the target. `RunMode`
-  (`DryRun`/`Write`) and `Width` (`Full`/`Plain`) replaced what were originally
-  two adjacent `bool` parameters: two booleans of the same type can be
-  transposed without the compiler noticing, and transposing these two would
+  mode, and width, then inserts or updates a marker-delimited tmux snippet in a
+  configuration file. It backs up the previous contents before replacing the
+  target atomically: the new contents are written to a uniquely named temporary
+  file, which inherits the target's permissions, then renamed over the target.
+  `RunMode` (`DryRun`/`Write`) and `Width` (`Full`/`Plain`) replaced what were
+  originally two adjacent `bool` parameters: two booleans of the same type can
+  be transposed without the compiler noticing, and transposing these two would
   silently turn a preview into a write of the wrong variant, so each is its own
   enum instead. The module is split by responsibility: `snippet.rs` decides
   what the config should contain (marker handling and snippet assembly, pure
@@ -105,22 +104,22 @@ entry points invoked from `main`: `run_status`, `run_refresh`, and
 The crate is deliberately restricted to Unix targets. `command/mod.rs` uses a
 compile-time `compile_error!` for every non-Unix build, with the diagnostic
 `dbar supports Unix targets only`. This is a contract rather than a tmux
-convenience: command timeouts put children in POSIX process groups so the
-whole descendant tree can be signalled, and the install transaction uses
-`flock` to serialize concurrent updates. Providing stubs on another platform
-would make those safety guarantees false.
+convenience: command timeouts put children in POSIX process groups so the whole
+descendant tree can be signalled, and the install transaction uses `flock` to
+serialize concurrent updates. Providing stubs on another platform would make
+those safety guarantees false.
 
-The `unix-only-build-contract` CI job installs the
-`x86_64-pc-windows-gnu` Rust target and runs `cargo check` for it. The job
-passes only when that check is rejected and its output contains the documented
-compile-time diagnostic, so the platform boundary remains tested.
+The `unix-only-build-contract` CI job installs the `x86_64-pc-windows-gnu` Rust
+target and runs `cargo check` for it. The job passes only when that check is
+rejected and its output contains the documented compile-time diagnostic, so the
+platform boundary remains tested.
 
 ### End-to-end assembly of a status line
 
 1. `run_status` in `src/lib.rs` constructs a `RealCommandRunner`, a
-   `DefaultClock` (from `mockable`), and a `FileCacheStorage`, then resolves the
-   project directory at the CLI boundary and passes a `StatusDependencies` value
-   containing the runner, clock, and cache's read port to
+   `DefaultClock` (from `mockable`), and a `FileCacheStorage`, then resolves
+   the project directory at the CLI boundary and passes a `StatusDependencies`
+   value containing the runner, clock, and cache's read port to
    `status::build_status_report`. It does not construct a GitHub client: status
    is a read-only query.
 2. `status::build_status_report` receives that directory, then calls
@@ -133,9 +132,9 @@ compile-time diagnostic, so the platform boundary remains tested.
 4. `run_refresh` constructs the GitHub client and a `FileCacheStorage`, then
    injects its `CacheStorage` port into `status::refresh_pr_cache`. That
    boundary applies `status::pr::decide` to the lookup result and writes
-   successful values through
-   `cache::store_cached_value`; failed lookups are not cached, so a transient
-   network error does not poison the PR value for the whole TTL.
+   successful values through `cache::store_cached_value`; failed lookups are
+   not cached, so a transient network error does not poison the PR value for
+   the whole TTL.
 5. `tmux::resolve_context` fills in any tmux fields not already supplied on
    the command line by querying `tmux display-message`.
 6. `render::render_status_line` combines the project, git, PR, tmux, and
@@ -159,8 +158,8 @@ The cache ports keep filesystem concerns out of status policy:
   port and uses it while rendering status.
 - `CacheWriter` owns the mutating operations: the bounded retention `sweep`
   and `store` for a refreshed value. `refresh_pr_cache` receives the combined
-  storage port and invokes these operations as required by the cache result
-  and persistence policy.
+  storage port and invokes these operations as required by the cache result and
+  persistence policy.
 - `CacheStorage` is the `CacheReader + CacheWriter` composition required by
   refresh. It is not needed by status, which must remain a cache-only query.
 
@@ -179,13 +178,13 @@ branch a checkout has ever had, including branches long since deleted.
 `cache/mod.rs` reclaims them under this policy:
 
 - **Trigger.** A read never sweeps. `load_cached_value` reports an entry past
-  its TTL as `CacheLookup::Expired` and leaves it on disk;
-  status reads the current entry but never lists the directory. After resolving
-  the cache directory, every explicit `dbar refresh` invokes the bounded sweep
-  before resolving the current key, regardless of whether that key is fresh,
-  missing, or expired. The reclamation is therefore visible at the refresh call
-  site rather than hidden behind a `load_*` name. Writes never sweep either
-  because `store_cached_value` is given no TTL to judge entries by.
+  its TTL as `CacheLookup::Expired` and leaves it on disk; status reads the
+  current entry but never lists the directory. After resolving the cache
+  directory, every explicit `dbar refresh` invokes the bounded sweep before
+  resolving the current key, regardless of whether that key is fresh, missing,
+  or expired. The reclamation is therefore visible at the refresh call site
+  rather than hidden behind a `load_*` name. Writes never sweep either because
+  `store_cached_value` is given no TTL to judge entries by.
 - **Bound.** One sweep lists at most 256 names, opens and parses at most 16
   of them, and removes at most 8 files. A backlog is therefore cleared across
   successive runs rather than in one unbounded pass on the hot path.
@@ -220,13 +219,12 @@ time:
   builds also get a `MockCommandRunner` that returns canned `CommandOutput`s or
   errors for the `CommandSpec`s a test expects.
 - `github::GitHubClient` — its `pr_number` method receives a project directory
-  and branch and returns an optional `PrNumber` or `GitHubError`.
-  `GhCliClient` wraps a `&dyn CommandRunner` to shell out to `gh`;
-  `MockGitHubClient` returns a fixed, pre-configured PR number and is the
-  concrete type wired up for `--github-mock-pr`, but any test can implement the
-  trait directly for finer control (see `StubGitHubClient` in
-  `src/status/tests.rs`, whose `Reply::Failure` variant stands in for a network
-  or rate-limit error).
+  and branch and returns an optional `PrNumber` or `GitHubError`. `GhCliClient`
+  wraps a `&dyn CommandRunner` to shell out to `gh`; `MockGitHubClient` returns
+  a fixed, pre-configured PR number and is the concrete type wired up for
+  `--github-mock-pr`, but any test can implement the trait directly for finer
+  control (see `StubGitHubClient` in `src/status/tests.rs`, whose
+  `Reply::Failure` variant stands in for a network or rate-limit error).
 
 - `cache::CacheReader` and `cache::CacheStorage` — the read-only port used by
   `status` and the read/write port reserved for `refresh`, respectively.
