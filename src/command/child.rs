@@ -144,7 +144,7 @@ fn join_started_reader(
 /// Owns a spawned child and its two reader threads for the whole of
 /// [`RealCommandRunner::run`].
 ///
-/// Cleanup lives in `Drop` rather than at each `return` because the hand-written
+/// Cleanup lives in `Drop` rather than at each `return` because the handwritten
 /// version only covered the exit paths somebody remembered. Every `?` between
 /// the spawn and the joins — taking the pipes, `wait_timeout`, the group kill,
 /// the joins themselves — used to return with the child unreaped and the reader
