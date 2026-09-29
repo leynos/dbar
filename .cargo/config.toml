@@ -19,9 +19,9 @@ codegen-backend = "cranelift"
 # matching `[target.*]` table replaces `[build] rustflags` outright, and an
 # assigned `RUSTFLAGS` replaces both. Every flag is therefore repeated in each
 # source here, and the Makefile composes them into the `RUSTFLAGS` its
-# recipes set. Coverage and release builds assign `RUSTFLAGS` without them on
-# purpose: a measurement and a shipped artefact stay on the platform linker
-# and the single-threaded frontend.
+# recipes set. Coverage and the release recipe and workflow assign `RUSTFLAGS`
+# without them on purpose. A direct `cargo build --release` keeps these flags
+# unless `RUSTFLAGS` is assigned.
 [build]
 rustflags = ["-Zthreads=8"]
 
