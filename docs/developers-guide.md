@@ -291,6 +291,33 @@ narrow repository-specific identifier, API, proper-name, or fixture exceptions
 to `typos.local.toml`; hand-editing `typos.toml` is not supported and any edits
 are overwritten on the next run.
 
+## The build standard
+
+Development, test, lint and typecheck builds use the parallel `rustc` frontend
+(`-Zthreads=8`) and, on Linux, the `mold` linker (`-Clink-arg=-fuse-ld=mold`).
+These are defaults in `.cargo/config.toml`, which Cargo discovers on its own,
+so a bare `cargo build` gets them. `mold` ships for Linux only, so the linker
+flag lives in a Linux-only table and macOS and Windows keep their platform
+linker. Cargo selects one `rustflags` source rather than merging them, so every
+source repeats the same flags apart from the linker.
+
+An assigned `RUSTFLAGS` replaces the configuration's flags, so the Makefile
+recipes that set it compose the standard's flags onto any inherited value (CI's
+`setup-rust` exports one). Two builds are deliberately excluded: coverage
+assigns `RUSTFLAGS` without the fast flags, because a measurement should not
+depend on them, and release builds keep the platform linker.
+
+### Cranelift
+
+Cranelift is the development-profile codegen backend. The full suite was
+measured under it on the pinned `nightly-2025-12-12` on 2026-09-29: all 292
+tests across the four test binaries and the doctests pass. Coverage selects
+LLVM explicitly (`CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm`), because
+instrumentation needs it, and release builds use the release profile, which
+Cranelift does not touch. Re-measure the whole suite on the next toolchain
+bump; if it fails, record the failing tests here as an exception and remove the
+backend from `.cargo/config.toml`.
+
 ## Testing guidance
 
 Tests are organized in three layers:

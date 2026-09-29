@@ -16,6 +16,11 @@ jobs:
           persist-credentials: false
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@3822201c597078a5ed1939bdf067fe06a3d78a9d
+        with:
+          # Export no RUSTFLAGS, so .cargo/config.toml's build-standard flags
+          # apply. The check below is expected to fail on a compile_error!, so
+          # setup-rust's default -D warnings decides nothing here.
+          rustflags: ''
       - name: Verify non-Unix builds are rejected
         run: |
           rustup target add x86_64-pc-windows-gnu
@@ -71,7 +76,9 @@ jobs:
               cargo install --locked whitaker-installer --version "${WHITAKER_INSTALLER_VERSION}"
             fi
           fi
-          whitaker-installer
+          # --cranelift provisions rustc-codegen-cranelift on Whitaker's pinned
+          # toolchain; the dev profile builds with the Cranelift backend.
+          whitaker-installer --cranelift
       - name: Lint
         run: make lint
       - name: Test and Measure Coverage
