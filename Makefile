@@ -32,7 +32,8 @@ TYPOS_CONFIG_BUILDER = uv tool run --from \
 # recipe that sets it composes these onto any inherited value (CI's
 # setup-rust exports one), except coverage, which stays on LLVM and the
 # platform linker.
-STANDARD_RUSTFLAGS := -Zthreads=8$(if $(filter Linux,$(shell uname -s)), -Clink-arg=-fuse-ld=mold)
+BUILD_HOST_OS := $(shell uname -s)
+STANDARD_RUSTFLAGS := -Zthreads=8$(if $(filter Linux,$(BUILD_HOST_OS)), -Clink-arg=-fuse-ld=mold)
 
 build: target/debug/$(TARGET) ## Build debug binary
 release: target/release/$(TARGET) ## Build release binary
