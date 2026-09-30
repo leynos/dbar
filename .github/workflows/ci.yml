@@ -15,13 +15,10 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@8a83824b29dfe8f861714b544dc85fb925ed010c
+        uses: leynos/shared-actions/.github/actions/setup-rust@abf0dcf2686de1eaf79b6dc9a16662b631bed149
         with:
           install-mold: 'true'
-          # Export no RUSTFLAGS, so .cargo/config.toml's build-standard flags
-          # apply. The check below is expected to fail on a compile_error!, so
-          # setup-rust's default -D warnings decides nothing here.
-          rustflags: ''
+          expect-cache: any
       - name: Verify non-Unix builds are rejected
         run: |
           rustup target add x86_64-pc-windows-gnu
@@ -44,9 +41,10 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@8a83824b29dfe8f861714b544dc85fb925ed010c
+        uses: leynos/shared-actions/.github/actions/setup-rust@abf0dcf2686de1eaf79b6dc9a16662b631bed149
         with:
           install-mold: 'true'
+          expect-cache: any
       - name: Setup uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
       - name: Install mdtablefix
