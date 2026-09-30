@@ -17,6 +17,7 @@ jobs:
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@abf0dcf2686de1eaf79b6dc9a16662b631bed149
         with:
+          install-mold: 'true'
           expect-cache: any
       - name: Verify non-Unix builds are rejected
         run: |
@@ -42,6 +43,7 @@ jobs:
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@abf0dcf2686de1eaf79b6dc9a16662b631bed149
         with:
+          install-mold: 'true'
           expect-cache: any
       - name: Setup uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
@@ -75,10 +77,17 @@ jobs:
               cargo install --locked whitaker-installer --version "${WHITAKER_INSTALLER_VERSION}"
             fi
           fi
-          whitaker-installer
+          # --cranelift provisions rustc-codegen-cranelift on Whitaker's pinned
+          # toolchain; the dev profile builds with the Cranelift backend.
+          whitaker-installer --cranelift
       - name: Lint
         run: make lint
       - name: Test and Measure Coverage
+        env:
+          # One of the two exclusions from the build standard: a coverage build is a
+          # measurement, so it takes neither the parallel frontend nor the mold linker.
+          # Assigning RUSTFLAGS displaces every `rustflags` table in .cargo/config.toml.
+          RUSTFLAGS: -D warnings
         uses: leynos/shared-actions/.github/actions/generate-coverage@22c1a57865e42ba7e2ca4f88ae49fa6f81f58013
         with:
           output-path: lcov.info
