@@ -244,8 +244,8 @@ pub fn development_problems(
 /// Returns every complaint about one held-out command: it assigns nothing, so
 /// it takes the configuration's flags, or the assignment names a standard flag.
 fn held_out_command_problems(target: &str, assignment: &Assignment) -> Problems {
-    let flags = match assignment {
-        Assignment::Flags(flags, _) => flags,
+    let (flags, inherits) = match assignment {
+        Assignment::Flags(flags, inherits) => (flags, *inherits),
         Assignment::Bare(command) => {
             return vec![format!(
                 "`make {target}` runs `{command}`, which takes the configuration's flags"
@@ -257,11 +257,17 @@ fn held_out_command_problems(target: &str, assignment: &Assignment) -> Problems 
         (flags.names_threads(), THREADS_FLAG),
         (flags.names_linker(), LINKER_FLAG),
     ];
-    named
+    let mut problems: Problems = named
         .into_iter()
         .filter(|(is_named, _)| *is_named)
         .map(|(_, flag)| format!("`make {target}` takes {flag}"))
-        .collect()
+        .collect();
+    // A release build keeps the caller's own flags (a sanitizer, a target feature) while it drops the
+    // standard's; only the coverage build, a measurement, ignores them.
+    if target == "release" && !inherits {
+        problems.push(format!("`make {target}` drops the caller's RUSTFLAGS"));
+    }
+    problems
 }
 
 /// Returns every complaint about the held-out targets, and how many commands it
