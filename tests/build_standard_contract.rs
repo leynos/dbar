@@ -21,11 +21,14 @@ mod fixtures;
 mod injected;
 #[path = "build_standard_support/make.rs"]
 mod make;
+#[path = "build_standard_support/workflow_exhaustive.rs"]
+mod workflow_exhaustive;
 use rstest::rstest;
 
 use fixtures::{
     BUILD_LOSES_THREADS, COMMENT_NAMING_THE_ACTION, COMMENTED_OK, COVERAGE_BORROWING_A_SIBLING,
-    COVERAGE_EMPTY_POLICY, COVERAGE_OK, COVERAGE_OTHER_POLICY, COVERAGE_UNASSIGNED,
+    COVERAGE_COMMENTED_POLICY, COVERAGE_DENYING_WITH_COMMENT, COVERAGE_EMPTY_POLICY,
+    COVERAGE_LOOKALIKE_POLICY, COVERAGE_OK, COVERAGE_OTHER_POLICY, COVERAGE_UNASSIGNED,
     COVERAGE_WITH_LINKER, COVERAGE_WITH_THREADS, LINKER_IN_BUILD, LINUX_LOSES_LINKER, NIGHTLY,
     NIGHTLY_OK, NIGHTLY_SPELLED_APART, NO_BUILD_SOURCE, NO_CHANNEL, SIBLING_KEY_OK, SPREAD_ARRAY,
     STABLE, STABLE_OK, STABLE_WITH_THREADS, STEP_BEFORE_A_SIBLING_THAT_INSTALLS, STEP_INPUT_OFF,
@@ -145,6 +148,36 @@ fn the_command_reader_reads_each_assignment(
         Ok(())
     } else {
         Err(format!("`{line}` was read wrongly"))
+    }
+}
+
+/// Scenario: `make -n` output for commands that assign no `RUSTFLAGS`.
+///
+/// Invariant: a build, test or lint command that assigns nothing is read as bare, which a
+/// development recipe must not leave; a formatter, a metadata probe and a documentation
+/// build stay unassigned, because they run no compiled code under test.
+#[rstest]
+#[case::cargo_test("cargo test\n", Assignment::Bare("cargo test".to_owned()))]
+#[case::cargo_by_path("/home/user/.cargo/bin/cargo test --workspace\n", Assignment::Bare("/home/user/.cargo/bin/cargo test --workspace".to_owned()))]
+#[case::nextest("cargo +nightly nextest run\n", Assignment::Bare("cargo +nightly nextest run".to_owned()))]
+#[case::clippy("cargo clippy --all-targets\n", Assignment::Bare("cargo clippy --all-targets".to_owned()))]
+#[case::typecheck("cargo check --workspace\n", Assignment::Bare("cargo check --workspace".to_owned()))]
+#[case::whitaker("whitaker --all\n", Assignment::Bare("whitaker --all".to_owned()))]
+#[case::formatter("cargo fmt --all --check\n", Assignment::Unassigned)]
+#[case::metadata("cargo metadata --format-version 1\n", Assignment::Unassigned)]
+#[case::documentation(
+    "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace\n",
+    Assignment::Unassigned
+)]
+fn the_command_reader_tells_a_bare_tool_from_an_exempt_command(
+    #[case] stdout: &str,
+    #[case] expected: Assignment,
+) -> Result<(), String> {
+    let read = commands_from(stdout)?;
+    if read == [expected] {
+        Ok(())
+    } else {
+        Err(format!("`{stdout}` was read as {read:?}"))
     }
 }
 
@@ -292,6 +325,7 @@ fn coverage_and_release_take_neither_flag() -> Result<(), String> {
 #[case::test_denies_nothing_useful("test", &[&["-A", "warnings", THREADS_FLAG][..]], 1)]
 #[case::a_probe_may_omit_it_beside_the_run("test", &[&[THREADS_FLAG][..], &["-D", "warnings", THREADS_FLAG][..]], 0)]
 #[case::build_may_omit_the_policy("build", &[&[THREADS_FLAG][..]], 0)]
+#[case::test_assigns_no_command("test", &[], 1)]
 fn the_test_target_keeps_the_warning_policy(
     #[case] target: &str,
     #[case] commands: &[&[&str]],
@@ -318,6 +352,9 @@ fn the_test_target_keeps_the_warning_policy(
 #[case::denying_warnings(COVERAGE_OK, true)]
 #[case::an_empty_warning_policy(COVERAGE_EMPTY_POLICY, false)]
 #[case::a_different_warning_policy(COVERAGE_OTHER_POLICY, false)]
+#[case::a_lookalike_flag(COVERAGE_LOOKALIKE_POLICY, false)]
+#[case::a_policy_only_in_a_comment(COVERAGE_COMMENTED_POLICY, false)]
+#[case::a_comment_after_the_policy(COVERAGE_DENYING_WITH_COMMENT, true)]
 fn a_coverage_step_keeps_the_repository_warning_policy(
     #[case] workflow: &str,
     #[case] denies: bool,

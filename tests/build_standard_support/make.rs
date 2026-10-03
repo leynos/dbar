@@ -40,7 +40,12 @@ impl Host {
 /// What one `make -n` command assigns to `RUSTFLAGS`.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Assignment {
+    /// A command that assigns nothing and takes the configuration's flags, and runs no
+    /// build, test or lint tool (a formatter, a metadata probe, a documentation build).
     Unassigned,
+    /// A build, test or lint command that assigns nothing. Development recipes must
+    /// assign `RUSTFLAGS` there, so the caller's flags and the warning policy reach it.
+    Bare(String),
     /// An assignment, and whether it keeps the caller's own `RUSTFLAGS`.
     Flags(Flags, bool),
 }
@@ -94,6 +99,37 @@ pub fn assigned_rustflags(line: &str) -> Result<Assignment, String> {
     ))
 }
 
+/// Cargo subcommands that compile or run code under test, so a recipe running one
+/// must assign `RUSTFLAGS`. Formatters, metadata probes and documentation builds are
+/// not among them.
+const FLAG_BEARING_SUBCOMMANDS: &[&str] = &["test", "nextest", "clippy", "check", "build"];
+
+/// Returns whether a command line runs a tool whose flags a development recipe must
+/// assign: one of the Cargo subcommands above, or Whitaker.
+///
+/// ```text
+/// runs_a_flag_bearing_tool("cargo +nightly clippy --all-targets") -> true
+/// runs_a_flag_bearing_tool("/home/u/.cargo/bin/cargo test")       -> true (Cargo exports its own path)
+/// runs_a_flag_bearing_tool("whitaker --all")                      -> true
+/// runs_a_flag_bearing_tool("cargo fmt --all --check")             -> false
+/// ```
+fn runs_a_flag_bearing_tool(line: &str) -> bool {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let cargo_subcommand = words
+        .iter()
+        .position(|word| word.rsplit('/').next() == Some("cargo"))
+        .and_then(|at| words.get(at + 1..))
+        .and_then(|rest| {
+            rest.iter()
+                .find(|word| !word.starts_with('+') && !word.starts_with('-'))
+        })
+        .is_some_and(|sub| FLAG_BEARING_SUBCOMMANDS.contains(sub));
+    cargo_subcommand
+        || words
+            .iter()
+            .any(|word| word.rsplit('/').next() == Some("whitaker"))
+}
+
 /// Reads the assignment of each cargo or whitaker command `make -n` printed.
 ///
 /// # Errors
@@ -108,7 +144,12 @@ pub fn commands_from(stdout: &str) -> Result<Vec<Assignment>, String> {
         // A tool-availability probe names Cargo but runs no build.
         .filter(|line| !line.trim_start().starts_with("command -v"))
         .filter(|line| line.contains("cargo") || line.contains("whitaker"))
-        .map(assigned_rustflags)
+        .map(|line| match assigned_rustflags(line)? {
+            Assignment::Unassigned if runs_a_flag_bearing_tool(line) => {
+                Ok(Assignment::Bare(line.trim().to_owned()))
+            }
+            other => Ok(other),
+        })
         .collect()
 }
 
@@ -148,6 +189,14 @@ fn make_commands(runner: MakeRunner, target: &str, host: Host) -> Result<Vec<Ass
     commands_from(&runner(target, host)?)
 }
 
+/// Returns the complaint about a development command that assigns no `RUSTFLAGS`.
+fn bare_problem(target: &str, host: Host, command: &str) -> String {
+    format!(
+        "`make {target}` on {} runs `{command}` without assigning RUSTFLAGS",
+        host.make_value()
+    )
+}
+
 /// Returns the complaint about one development command, if any: an assigned
 /// `RUSTFLAGS` keeps the caller's own flags and restates the frontend flag on a
 /// nightly pin, and mold on Linux.
@@ -157,8 +206,10 @@ pub fn development_problem(
     pin: Pin,
     assignment: &Assignment,
 ) -> Option<String> {
-    let Assignment::Flags(flags, inherits) = assignment else {
-        return None;
+    let (flags, inherits) = match assignment {
+        Assignment::Flags(flags, inherits) => (flags, inherits),
+        Assignment::Bare(command) => return Some(bare_problem(target, host, command)),
+        Assignment::Unassigned => return None,
     };
     if !inherits {
         return Some(format!(
@@ -170,17 +221,17 @@ pub fn development_problem(
     Some(format!("`make {target}` on {} {reason}", host.make_value()))
 }
 
-/// Returns the complaint when the `test` target keeps `-D warnings` in none of its
-/// assigned commands: a recipe may run other commands (a version probe, a
+/// Returns the complaint when the `test` target assigns `RUSTFLAGS` in no command, or
+/// keeps `-D warnings` in none of its assigned commands: a recipe may run other commands (a version probe, a
 /// prerequisite build) that never carried the policy, but dropping `$(RUST_FLAGS)`
 /// from the command that runs the tests drops it from all of them.
 pub fn test_policy_problem(target: &str, host: Host, commands: &[Assignment]) -> Option<String> {
     let assigned = commands.iter().filter_map(|command| match command {
         Assignment::Flags(flags, _) => Some(flags),
-        Assignment::Unassigned => None,
+        Assignment::Unassigned | Assignment::Bare(_) => None,
     });
     let keeps_the_policy = assigned.clone().any(Flags::denies_warnings);
-    (target == "test" && assigned.count() > 0 && !keeps_the_policy).then(|| {
+    (target == "test" && !keeps_the_policy).then(|| {
         format!(
             "`make {target}` on {} keeps -D warnings in none of its commands",
             host.make_value()
@@ -205,7 +256,7 @@ pub fn development_problems(
         let commands = make_commands(runner, target, host)?;
         read += commands
             .iter()
-            .filter(|command| **command != Assignment::Unassigned)
+            .filter(|command| matches!(command, Assignment::Flags(..)))
             .count();
         problems.extend(
             commands
