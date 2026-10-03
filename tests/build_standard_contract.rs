@@ -318,7 +318,7 @@ fn the_test_target_keeps_the_warning_policy(
 #[case::denying_warnings(COVERAGE_OK, true)]
 #[case::an_empty_warning_policy(COVERAGE_EMPTY_POLICY, false)]
 #[case::a_different_warning_policy(COVERAGE_OTHER_POLICY, false)]
-fn a_coverage_step_keeps_the_repositorys_warning_policy(
+fn a_coverage_step_keeps_the_repository_warning_policy(
     #[case] workflow: &str,
     #[case] denies: bool,
 ) {
