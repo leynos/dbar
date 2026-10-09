@@ -15,7 +15,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@0606ca899ce2995a0c4bc78e660e80832e6e8855
+        uses: leynos/shared-actions/.github/actions/setup-rust@5bc2b2611f5921ef2c56e4ee3fde2b879a319361
         with:
           install-mold: 'true'
           expect-cache: any
@@ -40,7 +40,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@0606ca899ce2995a0c4bc78e660e80832e6e8855
+        uses: leynos/shared-actions/.github/actions/setup-rust@5bc2b2611f5921ef2c56e4ee3fde2b879a319361
         with:
           install-mold: 'true'
           expect-cache: any
@@ -49,7 +49,7 @@ jobs:
       - name: Install mdtablefix
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
-        uses: leynos/shared-actions/.github/actions/install-mdtablefix@0606ca899ce2995a0c4bc78e660e80832e6e8855
+        uses: leynos/shared-actions/.github/actions/install-mdtablefix@5bc2b2611f5921ef2c56e4ee3fde2b879a319361
         with:
           version: "0.6.1"
 
@@ -60,7 +60,7 @@ jobs:
         with:
           globs: '**/*.md'
       - name: Install Whitaker Dylint suite
-        uses: leynos/shared-actions/.github/actions/install-whitaker@0606ca899ce2995a0c4bc78e660e80832e6e8855
+        uses: leynos/shared-actions/.github/actions/install-whitaker@5bc2b2611f5921ef2c56e4ee3fde2b879a319361
         with:
           # The dev profile builds with the Cranelift backend, so the lint suite's
           # toolchain needs rustc-codegen-cranelift too.
@@ -73,7 +73,7 @@ jobs:
           # measurement, so it takes neither the parallel frontend nor the mold linker.
           # Assigning RUSTFLAGS displaces every `rustflags` table in .cargo/config.toml.
           RUSTFLAGS: -D warnings
-        uses: leynos/shared-actions/.github/actions/generate-coverage@0606ca899ce2995a0c4bc78e660e80832e6e8855
+        uses: leynos/shared-actions/.github/actions/generate-coverage@5bc2b2611f5921ef2c56e4ee3fde2b879a319361
         with:
           output-path: lcov.info
           format: lcov
@@ -81,7 +81,7 @@ jobs:
         env:
           CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
         if: ${{ env.CS_ACCESS_TOKEN }}
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@0606ca899ce2995a0c4bc78e660e80832e6e8855
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@5bc2b2611f5921ef2c56e4ee3fde2b879a319361
         with:
           format: lcov
           access-token: ${{ env.CS_ACCESS_TOKEN }}
