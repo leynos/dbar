@@ -11,7 +11,10 @@ accepted = []
 [words.corrections]
 
 [patterns]
-ignore = []
+# The mold linker, named by the build standard section of the developers' guide.
+ignore = [
+  '\bmold\b',
+]
 
 [files]
 exclude = []
