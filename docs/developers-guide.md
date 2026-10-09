@@ -323,7 +323,9 @@ development target on a Linux host and a macOS host (each keeping the caller's
 own `RUSTFLAGS`) and for each coverage and release target on a Linux host, and
 the `setup-rust` steps of the CI workflows (each must pass `install-mold`), so
 a flag lost through a recipe or workflow edit fails there. The decision is
-recorded in [ADR 001](adr-001-rust-build-standard.md).
+recorded in [ADR 001](adr-001-rust-build-standard.md). The contract runs
+`make -n`, so a direct `cargo test` needs GNU make on the `PATH`. It fails when
+`make` is missing instead of skipping, so a missing tool cannot read as a pass.
 
 ### Cranelift
 
