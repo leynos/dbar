@@ -15,6 +15,12 @@ dbar runs on Unix only; it relies on POSIX process groups and `flock`, so it
 will not build or run on Windows. tmux itself is a Unix tool, so this is not a
 practical limitation for its intended use.
 
+On Linux, install `mold` first (`sudo apt-get install mold` on Debian or
+Ubuntu): the repository's Cargo configuration links with it, so a direct
+`cargo run` fails at link time without it. macOS keeps its platform linker. See
+[Build standard](#build-standard)
+for the flags and the release exceptions.
+
 Build and run from a git repository:
 
 ```sh
@@ -200,7 +206,9 @@ a PR value.
 Development builds (`make test`, `make lint`, `make typecheck` and the debug
 build) use the parallel `rustc` frontend (`-Zthreads=8`) and, on Linux, the
 `mold` linker. Install `mold` before building on Linux: the configuration names
-it, so a build without it fails at link time.
+it, so a build without it fails at link time (on Debian or Ubuntu,
+`sudo apt-get install mold`). macOS keeps its platform linker, because mold
+ships for Linux only.
 
 The flags live in `.cargo/config.toml`, but Cargo applies exactly one
 `rustflags` source and an assigned `RUSTFLAGS` replaces every configuration
