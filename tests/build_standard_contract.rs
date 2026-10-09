@@ -17,6 +17,8 @@ mod ci_steps;
 mod command_reader;
 #[path = "build_standard_support/config.rs"]
 mod config;
+#[path = "build_standard_support/cranelift.rs"]
+mod cranelift;
 #[path = "build_standard_support/exhaustive.rs"]
 mod exhaustive;
 #[path = "build_standard_support/fixtures.rs"]
@@ -34,15 +36,15 @@ mod workflow_exhaustive;
 use rstest::rstest;
 
 use fixtures::{
-    BUILD_LOSES_THREADS, COMMENT_AFTER_CHANNEL, COMMENT_NAMING_THE_ACTION, COMMENTED_OK,
-    COVERAGE_BORROWING_A_SIBLING, COVERAGE_COMMENTED_POLICY, COVERAGE_DENYING_WITH_COMMENT,
-    COVERAGE_EMPTY_POLICY, COVERAGE_LOOKALIKE_POLICY, COVERAGE_OK, COVERAGE_OTHER_POLICY,
-    COVERAGE_UNASSIGNED, COVERAGE_WITH_LINKER, COVERAGE_WITH_THREADS, LINKER_IN_BUILD,
-    LINUX_LOSES_LINKER, NIGHTLY, NIGHTLY_OK, NIGHTLY_SPELLED_APART, NO_BUILD_SOURCE, NO_CHANNEL,
-    SHORT_DATED_NIGHTLY, SIBLING_KEY_OK, SPREAD_ARRAY, STABLE, STABLE_OK, STABLE_WITH_THREADS,
-    STEP_BEFORE_A_SIBLING_THAT_INSTALLS, STEP_INPUT_OFF, STEP_INSTALLS, STEP_INSTALLS_BARE,
-    STEP_MISSING_INPUT, TRAILING_CONTENT, TRIPLE_ONLY, TWO_CHANNELS, UNCLOSED_CHANNEL,
-    UNDATED_NIGHTLY, UNKNOWN_CHANNEL, UNQUOTED_BESIDE_VALID,
+    BARE_NIGHTLY, BUILD_LOSES_THREADS, COMMENT_AFTER_CHANNEL, COMMENT_NAMING_THE_ACTION,
+    COMMENTED_OK, COVERAGE_BORROWING_A_SIBLING, COVERAGE_COMMENTED_POLICY,
+    COVERAGE_DENYING_WITH_COMMENT, COVERAGE_EMPTY_POLICY, COVERAGE_LOOKALIKE_POLICY, COVERAGE_OK,
+    COVERAGE_OTHER_POLICY, COVERAGE_UNASSIGNED, COVERAGE_WITH_LINKER, COVERAGE_WITH_THREADS,
+    LINKER_IN_BUILD, LINUX_LOSES_LINKER, NIGHTLY, NIGHTLY_OK, NIGHTLY_SPELLED_APART,
+    NO_BUILD_SOURCE, NO_CHANNEL, SHORT_DATED_NIGHTLY, SIBLING_KEY_OK, SPREAD_ARRAY, STABLE,
+    STABLE_OK, STABLE_WITH_THREADS, STEP_BEFORE_A_SIBLING_THAT_INSTALLS, STEP_INPUT_OFF,
+    STEP_INSTALLS, STEP_INSTALLS_BARE, STEP_MISSING_INPUT, TRAILING_CONTENT, TRIPLE_ONLY,
+    TWO_CHANNELS, UNCLOSED_CHANNEL, UNDATED_NIGHTLY, UNKNOWN_CHANNEL, UNQUOTED_BESIDE_VALID,
 };
 
 use ci_steps::{
@@ -143,7 +145,7 @@ fn a_rustflags_array_spread_over_lines_is_refused() -> Result<(), String> {
 /// Invariant: only a `nightly` channel reads as nightly, so only it is asked to
 /// carry `-Zthreads`; a missing, repeated, unknown or malformed channel is an
 /// error, not a stable pin by default, and a comment after the quote is fine. A
-/// nightly is `nightly` or `nightly-YYYY-MM-DD`; any other suffix is unknown.
+/// nightly is `nightly-YYYY-MM-DD`; a bare `nightly` floats, and any other suffix is unknown.
 #[rstest]
 #[case::nightly(Fixture(NIGHTLY), Some(Pin::Nightly))]
 #[case::stable(Fixture(STABLE), Some(Pin::Stable))]
@@ -153,6 +155,7 @@ fn a_rustflags_array_spread_over_lines_is_refused() -> Result<(), String> {
 #[case::unquoted_beside_a_valid_one(Fixture(UNQUOTED_BESIDE_VALID), None)]
 #[case::no_closing_quote(Fixture(UNCLOSED_CHANNEL), None)]
 #[case::an_undated_nightly(Fixture(UNDATED_NIGHTLY), None)]
+#[case::a_bare_nightly_floats(Fixture(BARE_NIGHTLY), None)]
 #[case::a_date_that_is_not_padded(Fixture(SHORT_DATED_NIGHTLY), None)]
 #[case::content_after_the_quote(Fixture(TRAILING_CONTENT), None)]
 #[case::comment_after_the_quote(Fixture(COMMENT_AFTER_CHANNEL), Some(Pin::Stable))]
