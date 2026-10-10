@@ -81,18 +81,19 @@ def test_make_all_includes_the_target() -> None:
 
 
 def test_ci_runs_the_target_unconditionally() -> None:
-    """Require a CI step that runs the target with no condition on it."""
+    """Require a CI step that runs the target under no step or job condition."""
     workflow = yaml.safe_load(
         (ROOT / ".github" / "workflows" / "ci.yml").read_text("utf-8")
     )
-    steps = [
-        step
+    runs = [
+        (job, step)
         for job in workflow["jobs"].values()
         for step in job.get("steps", [])
         if f"make {TARGET}" in str(step.get("run", ""))
     ]
-    assert steps, f"ci.yml must run `make {TARGET}` in a step"
-    assert all("if" not in step for step in steps), steps
+    assert runs, f"ci.yml must run `make {TARGET}` in a step"
+    assert all("if" not in step for _, step in runs), runs
+    assert all("if" not in job for job, _ in runs), "the job carries an `if`"
 
 
 def test_both_contract_runs_use_the_configured_uv() -> None:

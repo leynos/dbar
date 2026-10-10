@@ -32,6 +32,8 @@ name: Coverage (main)
 # its old SHA and republishes that commit's coverage until the next push
 # supersedes it. Keying the group on the event as well would let an earlier
 # dispatch finish after a newer push and upload older coverage last.
+permissions: {}
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
