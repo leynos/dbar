@@ -1,0 +1,78 @@
+name: Coverage (main)
+
+# Main owns both persistent coverage outputs: the CodeScene upload and the
+# ratchet baseline. Pull requests generate coverage only for their own ratchet
+# check, in ci.yml; they neither publish a report nor contact CodeScene.
+# CodeScene accepts `cs-coverage upload` only for an analysed branch, which a
+# pull request head is not, and its check mode fails on every project whose
+# coverage gates are off. Caches written on main are readable by every
+# pull-request run, so the baseline written here is the one those ratchet
+# checks compare against. `make test-workflow-contracts` holds this shape.
+#
+# The upload step is guarded on the ref alone. The uploader records a missing
+# CS_ACCESS_TOKEN (no CodeScene project yet) as a notice and a step-summary
+# line and succeeds, so a repository without a project shows the gap without a
+# red run. The token reaches the uploader only through its `access-token` input.
+#
+# Known exception: a Dependabot pull request merged by the automerge workflow
+# with GITHUB_TOKEN fires no push event, so that merge publishes nothing until
+# the next push to main (shared-actions #518 tracks the fix).
+
+'on':
+  push:
+    branches: [main]
+  # A dispatch may name any branch, so the upload step's ref conjunct is what
+  # keeps a branch's coverage out of CodeScene.
+  workflow_dispatch:
+
+# One group per ref, never cancelled. A cancelled publisher abandons both its
+# upload and its baseline write. With cancellation off, runs never overlap and
+# a newer trigger replaces any pending run. That bounds the overlap but does
+# not order runs by commit: a manual "Re-run jobs" on an older main run keeps
+# its old SHA and republishes that commit's coverage until the next push
+# supersedes it. Keying the group on the event as well would let an earlier
+# dispatch finish after a newer push and upload older coverage last.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  coverage-upload:
+    runs-on: ubuntu-latest
+    # The CodeScene token lives in this environment, whose deployment policy
+    # admits `main` alone; the codescene environment contract holds it to
+    # this job.
+    environment: codescene
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      BUILD_PROFILE: debug
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          persist-credentials: false
+      - name: Setup Rust
+        uses: leynos/shared-actions/.github/actions/setup-rust@5bc2b2611f5921ef2c56e4ee3fde2b879a319361
+        with:
+          install-mold: 'true'
+          expect-cache: any
+      - name: Test and Measure Coverage
+        env:
+          # One of the two exclusions from the build standard: a coverage build is a
+          # measurement, so it takes neither the parallel frontend nor the mold linker.
+          # Assigning RUSTFLAGS displaces every `rustflags` table in .cargo/config.toml.
+          RUSTFLAGS: -D warnings
+        uses: leynos/shared-actions/.github/actions/generate-coverage@cabf105ae230e3759cf77b1c2d1d73ea0b67e9a9
+        with:
+          output-path: lcov.info
+          format: lcov
+          with-ratchet: 'true'
+      - name: Upload coverage data to CodeScene
+        if: github.ref == 'refs/heads/main'
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@cabf105ae230e3759cf77b1c2d1d73ea0b67e9a9
+        with:
+          path: lcov.info
+          format: lcov
+          mode: upload
+          access-token: ${{ secrets.CS_ACCESS_TOKEN }}

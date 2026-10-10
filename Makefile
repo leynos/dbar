@@ -1,4 +1,4 @@
-.PHONY: help all clean test build release lint fmt check-fmt typecheck markdownlint \
+.PHONY: help all clean test build release lint fmt check-fmt typecheck markdownlint \ test-workflow-contracts
 	spelling nixie
 
 
@@ -38,7 +38,18 @@ STANDARD_RUSTFLAGS := -Zthreads=8$(if $(filter Linux,$(BUILD_HOST_OS)), -Clink-a
 build: target/debug/$(TARGET) ## Build debug binary
 release: target/release/$(TARGET) ## Build release binary
 
-all: check-fmt lint test ## Perform a comprehensive check of code
+UV ?= uv
+UV_ENV ?=
+# The shared CV-005 contract (leynos/shared-actions, `cv005-contracts`) is run
+# from a pinned commit: a fix to the rule reaches this repository as a reviewed
+# bump of the pin, not as a silent upgrade. `.github/cv005.toml` holds the
+# parameters only.
+CV005_CONTRACTS_REF ?= cabf105ae230e3759cf77b1c2d1d73ea0b67e9a9
+CV005_CONTRACTS = $(UV_ENV) $(UV) tool run --python 3.13 \
+	--from 'git+https://github.com/leynos/shared-actions@$(CV005_CONTRACTS_REF)\#subdirectory=packages/cv005-contracts' \
+	cv005-contracts
+
+all: check-fmt lint test test-workflow-contracts ## Perform a comprehensive check of code
 
 clean: ## Remove build artifacts
 	$(CARGO) clean
@@ -81,3 +92,7 @@ nixie: ## Validate Mermaid diagrams
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
 	awk 'BEGIN {FS=":"; printf "Available targets:\n"} {printf "  %-20s %s\n", $$1, $$2}'
+
+test-workflow-contracts: ## Validate the CodeScene coverage workflow contract (CV-005)
+	$(CV005_CONTRACTS) check --repository .
+	$(UV_ENV) $(UV) run --with 'pytest>=8' --with 'pyyaml>=6' pytest tests/workflow_contracts -q
