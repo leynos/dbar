@@ -11,13 +11,22 @@ use super::config::{Flags, Problems, THREADS_FLAG};
 /// The workflows that set up Rust and build under the standard, as name and text.
 /// The list is this repository's own, so a workflow that stops setting up Rust
 /// fails the contract rather than dropping out of it.
-pub const WORKFLOWS: &[(&str, &str)] = &[(
-    "ci.yml",
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/.github/workflows/ci.yml"
-    )),
-)];
+pub const WORKFLOWS: &[(&str, &str)] = &[
+    (
+        "ci.yml",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/.github/workflows/ci.yml"
+        )),
+    ),
+    (
+        "coverage-main.yml",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/.github/workflows/coverage-main.yml"
+        )),
+    ),
+];
 
 /// A workflow file: its name for complaints, and its text.
 #[derive(Clone, Copy)]
