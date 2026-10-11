@@ -62,12 +62,9 @@ def _tracked(*patterns: str) -> list[str]:
     ).stdout.split()
 
 
-def _python_directories() -> set[str]:
-    """Return the paths that hold Python source or stubs Git tracks."""
-    return {
-        str(Path(name).parent) if "/" in name else name
-        for name in _tracked("*.py", "*.pyi")
-    }
+def _python_directories() -> set[Path]:
+    """Return the directories that hold Python source or stubs Git tracks."""
+    return {Path(name).parent for name in _tracked("*.py", "*.pyi")}
 
 
 def test_lint_depends_on_interrogate() -> None:
@@ -84,42 +81,44 @@ def test_the_tool_is_pinned_and_run_through_uv() -> None:
 
 
 def test_the_flags_demand_a_full_exact_report() -> None:
-    """Threshold 100, every definition printed, and stubs included."""
+    """Exactly: every definition printed, threshold 100, stubs when present.
+
+    Equality, not a deny-list: any other flag (an ignore or exclude option, or
+    `-q` and `-o`, which suppress or redirect the report the guard reads) could
+    relax the gate or blind the MISSED guard.
+    """
     flags = _variable("INTERROGATE_FLAGS").split()
-    assert "--fail-under" in flags
-    assert flags[flags.index("--fail-under") + 1] == "100"
-    assert "-vv" in flags
+    expected = ["-vv", "--fail-under", "100"]
     if _tracked("*.pyi"):
-        assert "--ext" in flags, "stubs need --ext pyi"
-        assert flags[flags.index("--ext") + 1] == "pyi", "stubs need --ext pyi"
-    relaxing = [f for f in flags if f.startswith(("--ignore", "--exclude", "-e"))]
-    assert not relaxing, f"no ignore or exclude flag may relax the gate: {relaxing}"
+        expected = ["-vv", "--ext", "pyi", "--fail-under", "100"]
+    assert flags == expected, f"INTERROGATE_FLAGS must be exactly {expected}, not {flags}"
 
 
 def test_every_python_directory_is_a_target() -> None:
-    """A Python directory outside `INTERROGATE_TARGETS` is undocumented unchecked."""
-    targets = _variable("INTERROGATE_TARGETS").split()
+    """A Python directory outside `INTERROGATE_TARGETS` is not checked."""
+    targets = [Path(t) for t in _variable("INTERROGATE_TARGETS").split()]
     uncovered = [
-        directory
+        str(directory)
         for directory in sorted(_python_directories())
-        if not any(directory == t or directory.startswith(f"{t}/") for t in targets)
+        if not any(directory.is_relative_to(target) for target in targets)
     ]
     assert not uncovered, f"add these to INTERROGATE_TARGETS: {uncovered}"
 
 
 def test_ci_installs_uv_before_it_runs_make_lint() -> None:
-    """The target runs interrogate through uv, so the lint job needs uv first."""
+    """Every job that runs `make lint` needs uv set up first, and one must run it."""
     workflow = yaml.safe_load(CI.read_text(encoding="utf-8"))
-    for job in workflow["jobs"].values():
+    checked = 0
+    for name, job in workflow["jobs"].items():
         steps = job.get("steps", [])
         lint = [i for i, s in enumerate(steps) if str(s.get("run", "")).strip() == "make lint"]
         if not lint:
             continue
         uv = [i for i, s in enumerate(steps) if "setup-uv" in str(s.get("uses", ""))]
-        assert uv
-        assert min(uv) < lint[0]
-        return
-    pytest.fail("no CI job runs `make lint`")
+        assert uv, f"job {name} runs make lint without setting up uv"
+        assert min(uv) < lint[0], f"job {name} sets up uv after make lint"
+        checked += 1
+    assert checked, "no CI job runs `make lint`"
 
 
 def _run_target(tmp_path: Path, script: str) -> subprocess.CompletedProcess[str]:

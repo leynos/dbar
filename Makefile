@@ -1,6 +1,5 @@
-.PHONY: interrogate
 .PHONY: help all clean test build release lint fmt check-fmt typecheck markdownlint \
-	spelling nixie
+	spelling nixie interrogate
 .PHONY: test-workflow-contracts
 
 
