@@ -134,6 +134,10 @@ project:
 
     linting every target with all features enabled and denying all Clippy
     warnings.
+    It first runs `make interrogate`, which needs `uv` and fails on any Python
+    definition under `tests` without a docstring (and on any `MISSED` row,
+    because interrogate rounds its percentage to one decimal);
+    `tests/workflow_contracts/interrogate_gate_test.py` asserts the wiring.
   - `make test` executes:
 
     ```sh

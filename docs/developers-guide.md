@@ -268,7 +268,9 @@ committing:
 
 - `make build` / `make release` — build the debug or release binary.
 - `make test` — `cargo test --all-targets --all-features` with `-D warnings`.
-- `make lint` — runs `cargo doc --no-deps`, then
+- `make lint` — first runs `make interrogate` (Python docstring coverage over
+  `tests`; it needs `uv` and fails on any undocumented definition or `MISSED`
+  row), then runs `cargo doc --no-deps`, then
   `cargo clippy --all-targets --all-features -- -D warnings`, then the Whitaker
   Dylint suite (`whitaker --all`) against the same targets and features, and
   finally the spelling gate (see below).
