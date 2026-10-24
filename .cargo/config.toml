@@ -14,6 +14,8 @@ codegen-backend = true
 
 [profile.dev]
 codegen-backend = "cranelift"
+incremental = false
+debug = 0
 
 # Cargo selects a single `rustflags` source rather than merging them: a
 # matching `[target.*]` table replaces `[build] rustflags` outright, and an
