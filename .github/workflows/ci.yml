@@ -15,7 +15,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@8e6a325765ba382691d1b1c65fcccf1fc1d1b00c
+        uses: leynos/shared-actions/.github/actions/setup-rust@872f59f53717b5bebe8e24b2f4a7496b089a939a
         with:
           install-mold: 'true'
           expect-cache: any
@@ -40,7 +40,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@8e6a325765ba382691d1b1c65fcccf1fc1d1b00c
+        uses: leynos/shared-actions/.github/actions/setup-rust@872f59f53717b5bebe8e24b2f4a7496b089a939a
         with:
           install-mold: 'true'
           expect-cache: any
@@ -49,7 +49,7 @@ jobs:
       - name: Install mdtablefix
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
-        uses: leynos/shared-actions/.github/actions/install-mdtablefix@8e6a325765ba382691d1b1c65fcccf1fc1d1b00c
+        uses: leynos/shared-actions/.github/actions/install-mdtablefix@872f59f53717b5bebe8e24b2f4a7496b089a939a
         with:
           version: "0.6.1"
 
@@ -60,7 +60,7 @@ jobs:
         with:
           globs: '**/*.md'
       - name: Install Whitaker Dylint suite
-        uses: leynos/shared-actions/.github/actions/install-whitaker@5a99aed78ce68dcebd3052b75c31e6f173162b1e
+        uses: leynos/shared-actions/.github/actions/install-whitaker@872f59f53717b5bebe8e24b2f4a7496b089a939a
         with:
           # The dev profile builds with the Cranelift backend, so the lint suite's
           # toolchain needs rustc-codegen-cranelift too.
@@ -75,7 +75,7 @@ jobs:
           # measurement, so it takes neither the parallel frontend nor the mold linker.
           # Assigning RUSTFLAGS displaces every `rustflags` table in .cargo/config.toml.
           RUSTFLAGS: -D warnings
-        uses: leynos/shared-actions/.github/actions/generate-coverage@8e6a325765ba382691d1b1c65fcccf1fc1d1b00c
+        uses: leynos/shared-actions/.github/actions/generate-coverage@872f59f53717b5bebe8e24b2f4a7496b089a939a
         with:
           output-path: lcov.info
           format: lcov
