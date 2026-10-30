@@ -60,7 +60,7 @@ jobs:
         with:
           globs: '**/*.md'
       - name: Install Whitaker Dylint suite
-        uses: leynos/shared-actions/.github/actions/install-whitaker@8e6a325765ba382691d1b1c65fcccf1fc1d1b00c
+        uses: leynos/shared-actions/.github/actions/install-whitaker@5a99aed78ce68dcebd3052b75c31e6f173162b1e
         with:
           # The dev profile builds with the Cranelift backend, so the lint suite's
           # toolchain needs rustc-codegen-cranelift too.
