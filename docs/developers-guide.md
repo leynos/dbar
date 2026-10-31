@@ -353,7 +353,14 @@ standard (no parallel frontend, no `mold` linker flag and no inherited
 `RUSTFLAGS`), and because it starts outside the checkout, Cargo never discovers
 `.cargo/config.toml` and its Cranelift profile, which that toolchain does not
 carry. The build-standard contract reads that isolated command as exempt from
-the restatement clauses, and ADR 001 records the exception.
+the restatement clauses only when a `cd` out of the checkout precedes it on the
+same recipe line, and ADR 001 records the exception.
+`tests/whitaker_isolation_contract.rs` reads the real `make -n lint` output and
+fails unless Whitaker starts from the checkout's parent, assigns the literal
+`RUSTFLAGS="-D warnings"` and names the manifest by absolute path. It also
+holds the `unix-only-build-contract` workflow job to an empty `rustflags` input
+on its `setup-rust` step, so that job's check reads the repository's own Cargo
+configuration instead of the flags the setup action exports.
 
 ### Cranelift
 

@@ -17,7 +17,10 @@ use super::make::{Assignment, commands_from};
 #[case::clippy("cargo clippy --all-targets\n", Assignment::Bare("cargo clippy --all-targets".to_owned()))]
 #[case::typecheck("cargo check --workspace\n", Assignment::Bare("cargo check --workspace".to_owned()))]
 #[case::whitaker("whitaker --all\n", Assignment::Bare("whitaker --all".to_owned()))]
-#[case::isolated_whitaker("RUSTFLAGS=\"-D warnings\" whitaker --all\n", Assignment::Unassigned)]
+#[case::whitaker_isolated_after_leaving_the_checkout(
+    "cd \"/work/\" && RUSTFLAGS=\"-D warnings\" whitaker --all\n",
+    Assignment::Unassigned
+)]
 #[case::llvm_cov("cargo llvm-cov nextest\n", Assignment::Bare("cargo llvm-cov nextest".to_owned()))]
 #[case::version_probe("cargo nextest --version\n", Assignment::Unassigned)]
 #[case::formatter("cargo fmt --all --check\n", Assignment::Unassigned)]
@@ -71,6 +74,8 @@ fn tally(stdout: &str) -> Result<(usize, usize), String> {
 #[case::a_bare_build_after_or("true || cargo build\n", (0, 1))]
 #[case::a_separator_inside_quotes("RUSTFLAGS=\"A\" cargo test -- --skip \"a;b&&c\"\n", (1, 0))]
 #[case::a_pipe_is_not_a_separator("cargo metadata --format-version 1 | jq .\n", (0, 0))]
+#[case::whitaker_literal_flags_after_leaving_the_checkout("cd \"/work/\" && RUSTFLAGS=\"-D warnings\" whitaker --all\n", (0, 0))]
+#[case::whitaker_literal_flags_inside_the_checkout("RUSTFLAGS=\"-D warnings\" whitaker --all\n", (1, 0))]
 fn the_command_reader_judges_each_chained_command(
     #[case] stdout: &str,
     #[case] expected: (usize, usize),

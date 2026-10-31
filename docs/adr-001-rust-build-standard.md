@@ -79,7 +79,11 @@ the development standard.
 - Consequence: Whitaker links with the platform linker, and a caller's
   `RUSTFLAGS` no longer reaches it.
 - `tests/build_standard_support/make.rs` reads an isolated Whitaker command as
-  exempt from the restatement clauses.
+  exempt from the restatement clauses only when a `cd` precedes it on the
+  recipe line; `tests/whitaker_isolation_contract.rs` proves the parent
+  directory, the absolute manifest path and the literal `RUSTFLAGS` against the
+  real `make -n lint` output, and the empty `rustflags` input of the
+  `unix-only-build-contract` job's `setup-rust` step.
 - The `unix-only-build-contract` job passes `rustflags: ''` to `setup-rust`, so
   its `cargo check` reads the repository's Cargo configuration instead of the
   action's exported `-D warnings` (BD-009).
