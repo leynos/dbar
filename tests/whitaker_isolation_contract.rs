@@ -10,6 +10,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use rstest::rstest;
+
 /// The workflow text the bare-build job is read from.
 const CI_WORKFLOW: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -84,27 +86,28 @@ fn make_lint_isolates_whitaker_from_the_checkout() -> Result<(), String> {
     }
 }
 
+/// The whole isolated command, for a checkout at `/work/repo`.
+const WHOLE: &str = "cd \"/work/\" && RUSTFLAGS=\"-D warnings\" whitaker --manifest-path \"/work/repo/Cargo.toml\" --all";
+
 /// Scenario: Whitaker commands that each lack one isolation detail.
 ///
-/// Invariant: each missing detail is reported, so a recipe that drops one cannot pass.
-#[test]
-fn a_whitaker_command_missing_an_isolation_detail_is_reported() -> Result<(), String> {
-    let checkout = Path::new("/work/repo");
-    let whole = "cd \"/work/\" && RUSTFLAGS=\"-D warnings\" whitaker --manifest-path \"/work/repo/Cargo.toml\" --all";
-    let cases = [
-        whole.replace("cd \"/work/\" && ", ""),
-        whole.replace("RUSTFLAGS=\"-D warnings\" ", ""),
-        whole.replace("--manifest-path \"/work/repo/Cargo.toml\" ", ""),
-    ];
-    if !isolation_problems(whole, checkout).is_empty() {
-        return Err("the whole command must pass".to_owned());
+/// Invariant: the whole command passes and each missing detail is reported, so a recipe that
+/// drops one cannot pass.
+#[rstest]
+#[case::whole(WHOLE.to_owned(), 0)]
+#[case::no_cd(WHOLE.replacen("cd \"/work/\" && ", "", 1), 1)]
+#[case::no_literal_flags(WHOLE.replacen("RUSTFLAGS=\"-D warnings\" ", "", 1), 1)]
+#[case::no_manifest_path(WHOLE.replacen("--manifest-path \"/work/repo/Cargo.toml\" ", "", 1), 1)]
+fn a_whitaker_command_missing_an_isolation_detail_is_reported(
+    #[case] line: String,
+    #[case] reported: usize,
+) -> Result<(), String> {
+    let found = isolation_problems(&line, Path::new("/work/repo")).len();
+    if found == reported {
+        Ok(())
+    } else {
+        Err(format!("{found} problems, not {reported}: {line}"))
     }
-    for case in &cases {
-        if isolation_problems(case, checkout).len() != 1 {
-            return Err(format!("one detail missing must give one problem: {case}"));
-        }
-    }
-    Ok(())
 }
 
 /// Returns the lines of one job of a workflow: from its key to the next job.
