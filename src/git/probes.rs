@@ -283,11 +283,11 @@ fn filter_is_selected(output: &[u8]) -> Result<bool, ()> {
         .unwrap_or(output)
         .split(|byte| *byte == b'\0')
         .collect::<Vec<_>>();
-    let mut records = fields.chunks_exact(3);
-    if !records.remainder().is_empty() {
+    let (records, remainder) = fields.as_chunks::<3>();
+    if !remainder.is_empty() {
         return Err(());
     }
-    Ok(records.any(
+    Ok(records.iter().any(
         |record| matches!(record, [_, b"filter", value] if !matches!(*value, b"unspecified" | b"unset")),
     ))
 }

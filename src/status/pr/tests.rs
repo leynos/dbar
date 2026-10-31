@@ -99,7 +99,7 @@ fn a_healthy_report_describes_no_failures() {
         resolution: PrResolution::NoPr,
         write: CacheWriteOutcome::Stored,
     };
-    assert!(report.describe_failures().is_empty());
+    assert_eq!(report.describe_failures(), [] as [std::string::String; 0]);
 }
 
 #[rstest]

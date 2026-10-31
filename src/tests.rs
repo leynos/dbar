@@ -47,7 +47,10 @@ fn degraded_diagnostics() -> StatusDiagnostics {
 #[test]
 fn diagnostic_lines_are_emitted_only_when_enabled() {
     let diagnostics = degraded_diagnostics();
-    assert!(diagnostic_lines(&diagnostics, false).is_empty());
+    assert_eq!(
+        diagnostic_lines(&diagnostics, false),
+        [] as [std::string::String; 0]
+    );
 
     let enabled = diagnostic_lines(&diagnostics, true);
     assert_eq!(enabled, diagnostics.describe_failures());
@@ -95,7 +98,7 @@ fn report_diagnostics_writes_only_when_enabled() {
 
     let mut quiet = Vec::new();
     report_diagnostics(&mut quiet, &diagnostics, false).expect("buffered write cannot fail");
-    assert!(quiet.is_empty());
+    assert_eq!(quiet, [] as [u8; 0]);
 
     let mut loud = Vec::new();
     report_diagnostics(&mut loud, &diagnostics, true).expect("buffered write cannot fail");

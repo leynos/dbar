@@ -85,10 +85,16 @@ interrogate: ## Enforce complete Python docstring coverage
 	    exit 1; \
 	  fi
 
+# Whitaker runs under the toolchain its installer manages, so it takes none of
+# the development standard: its literal `RUSTFLAGS` displaces the `rustflags`
+# tables (no frontend flag, no `mold`) and inherits nothing from the caller. It
+# also runs from the checkout's parent with an absolute manifest path, so Cargo
+# never discovers this checkout's `.cargo/config.toml`, whose Cranelift profile
+# the installer-managed toolchain does not carry.
 lint: interrogate ## Run Clippy and the Whitaker Dylint suite with warnings denied
 	RUSTDOCFLAGS="$(RUSTDOC_FLAGS)" RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" $(CARGO) doc --no-deps
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(STANDARD_RUSTFLAGS)" $(CARGO) clippy $(CLIPPY_FLAGS)
-	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }$(RUST_FLAGS) $(STANDARD_RUSTFLAGS)" $(WHITAKER) --all -- $(CARGO_FLAGS)
+	cd "$(dir $(CURDIR))" && RUSTFLAGS="-D warnings" $(WHITAKER) --manifest-path "$(CURDIR)/Cargo.toml" --all -- $(CARGO_FLAGS)
 	+$(MAKE) spelling
 
 fmt: ## Format Rust and Markdown sources

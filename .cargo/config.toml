@@ -11,6 +11,10 @@
 # instrumentation needs it, and release builds use the release profile.
 [unstable]
 codegen-backend = true
+# Native Cargo metadata setting for dated nightlies from 2026-07-31 (rule
+# `rust-dev-build-footprint`, DF-003): Cargo coordinates metadata output itself.
+# Never use raw rustc metadata flags; they broke build scripts.
+embed-metadata = false
 
 [profile.dev]
 codegen-backend = "cranelift"

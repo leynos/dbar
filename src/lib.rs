@@ -257,7 +257,7 @@ fn run_install(args: config::InstallArgs) -> Result<(), DbarError> {
     // default of `false`. Read before `path` is moved out of `args`.
     let mode = install::RunMode::from_dry_run(args.is_dry_run());
     let width = install::Width::from_full(args.is_full());
-    let position = args.position.map(Into::into).unwrap_or_default();
+    let position = args.position.map_or_default(Into::into);
     let path = args
         .path
         .or_else(|| Some(config::default_tmux_config_path()));

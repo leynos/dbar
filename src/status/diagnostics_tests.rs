@@ -31,7 +31,7 @@ fn a_status_line_survives_every_probe_failing(cache_root: io::Result<(TempDir, U
 
     // The rendered contract: a project segment and nothing that needs git,
     // tmux, or a PR lookup.
-    assert!(!report.line.is_empty());
+    assert_ne!(report.line, "");
     assert!(!report.line.contains("\u{f418}"));
     // Without a branch there is nothing to look up in the cache.
     assert!(report.diagnostics.pr.is_none());
@@ -47,5 +47,8 @@ fn a_status_line_survives_every_probe_failing(cache_root: io::Result<(TempDir, U
 
 #[rstest]
 fn diagnostics_are_empty_when_nothing_degrades() {
-    assert!(StatusDiagnostics::default().describe_failures().is_empty());
+    assert_eq!(
+        StatusDiagnostics::default().describe_failures(),
+        [] as [std::string::String; 0]
+    );
 }

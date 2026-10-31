@@ -329,16 +329,44 @@ recorded in [ADR 001](adr-001-rust-build-standard.md). The contract runs
 `make -n`, so a direct `cargo test` needs GNU make on the `PATH`. It fails when
 `make` is missing instead of skipping, so a missing tool cannot read as a pass.
 
+### Development build footprint
+
+The development profile sets `incremental = false` and `debug = 0` in
+`[profile.dev]` of `.cargo/config.toml`, beside the Cranelift backend, so a dev
+build keeps no incremental state or debug information. To debug, set
+`CARGO_PROFILE_DEV_DEBUG=true`; to rebuild incrementally, set
+`CARGO_INCREMENTAL=1` (unset any `sccache` wrapper first, which refuses
+incremental builds). `.cargo/config.toml` also sets
+`[unstable] embed-metadata = false`, the native Cargo key for nightlies from
+2026-07-31, so Cargo coordinates metadata output itself. No raw rustc metadata
+flags are used, and the pin is not moved to suit the key.
+`tests/build_footprint_contract.rs` holds all three settings and proves them,
+with both overrides, at the Cargo boundary by building a one-file crate under
+the repository's own `[profile.dev]` table and Cargo configuration.
+
+### Whitaker isolation
+
+`make lint` runs Whitaker with the literal `RUSTFLAGS="-D warnings"`, from the
+checkout's parent directory with an absolute `--manifest-path`. Whitaker runs
+under the toolchain its installer manages, so it takes none of the development
+standard (no parallel frontend, no `mold` linker flag and no inherited
+`RUSTFLAGS`), and because it starts outside the checkout, Cargo never discovers
+`.cargo/config.toml` and its Cranelift profile, which that toolchain does not
+carry. The build-standard contract reads that isolated command as exempt from
+the restatement clauses, and ADR 001 records the exception.
+
 ### Cranelift
 
 Cranelift is the development-profile codegen backend. The full suite was
-measured under it on the pinned `nightly-2025-12-12` on 2026-09-29: all 292
-tests across the four test binaries and the doctests pass. Coverage selects
-LLVM explicitly (`CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm`), because
-instrumentation needs it, and release builds use the release profile, which
-Cranelift does not touch. Re-measure the whole suite on the next toolchain
-bump; if it fails, record the failing tests here as an exception and remove the
-backend from `.cargo/config.toml`.
+measured under it on the pinned `nightly-2026-10-30` on 2026-10-31: `make test`
+ran 396 tests across the test binaries and the doctests, and all pass (the
+earlier measurement, on `nightly-2025-12-12` on 2026-09-29, passed all 292
+tests then). Coverage selects LLVM explicitly
+(`CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm`), because instrumentation needs it,
+and release builds use the release profile, which Cranelift does not touch.
+Re-measure the whole suite on the next toolchain bump; if it fails, record the
+failing tests here as an exception and remove the backend from
+`.cargo/config.toml`.
 
 ## Testing guidance
 

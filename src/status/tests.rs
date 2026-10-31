@@ -172,7 +172,7 @@ fn a_fresh_cache_entry_short_circuits_the_lookup(cache_root: io::Result<(TempDir
     ));
     // A hit must not consult GitHub at all.
     assert_eq!(github.calls.get(), 0);
-    assert!(report.describe_failures().is_empty());
+    assert_eq!(report.describe_failures(), [] as [std::string::String; 0]);
 }
 
 #[rstest]

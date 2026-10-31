@@ -17,6 +17,7 @@ use super::make::{Assignment, commands_from};
 #[case::clippy("cargo clippy --all-targets\n", Assignment::Bare("cargo clippy --all-targets".to_owned()))]
 #[case::typecheck("cargo check --workspace\n", Assignment::Bare("cargo check --workspace".to_owned()))]
 #[case::whitaker("whitaker --all\n", Assignment::Bare("whitaker --all".to_owned()))]
+#[case::isolated_whitaker("RUSTFLAGS=\"-D warnings\" whitaker --all\n", Assignment::Unassigned)]
 #[case::llvm_cov("cargo llvm-cov nextest\n", Assignment::Bare("cargo llvm-cov nextest".to_owned()))]
 #[case::version_probe("cargo nextest --version\n", Assignment::Unassigned)]
 #[case::formatter("cargo fmt --all --check\n", Assignment::Unassigned)]
