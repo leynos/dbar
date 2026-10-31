@@ -118,8 +118,10 @@ mod cargo_boundary {
 
     use std::process::Command;
 
-    use camino::Utf8PathBuf;
-    use cap_std::{ambient_authority, fs_utf8::Dir};
+    use cap_std::{
+        ambient_authority,
+        fs_utf8::{Dir, camino::Utf8PathBuf},
+    };
     use rstest::rstest;
 
     use super::{CARGO_CONFIG, pinned_channel};
@@ -139,50 +141,96 @@ mod cargo_boundary {
         "CARGO_PROFILE_DEV_INCREMENTAL",
     ];
 
-    /// Builds the fixture crate and returns the rustc command line Cargo ran.
-    fn compile_fixture(name: &str, extra_env: &[(&str, &str)]) -> String {
-        let root = Utf8PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
-        Dir::create_ambient_dir_all(&root, ambient_authority())
-            .expect("the fixture directory must be creatable");
-        let dir = Dir::open_ambient_dir(&root, ambient_authority())
-            .expect("the fixture directory must open");
-        dir.create_dir_all("src").expect("src must be creatable");
-        dir.create_dir_all(".cargo")
-            .expect(".cargo must be creatable");
-        dir.write(
-            "Cargo.toml",
-            "[package]\nname = \"footprint\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[workspace]\n",
-        )
-        .expect("the manifest must be writable");
-        dir.write("src/lib.rs", "pub fn footprint() {}\n")
-            .expect("the library must be writable");
-        dir.write(".cargo/config.toml", CARGO_CONFIG)
-            .expect("the configuration must be writable");
+    /// The fixture crate's manifest. It is its own workspace root, so a target
+    /// directory inside the checkout (as under `cargo llvm-cov`) cannot make
+    /// Cargo find the checkout's workspace above it.
+    const FIXTURE_MANIFEST: &str =
+        "[package]\nname = \"footprint\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[workspace]\n";
+
+    /// A fixture build: its directory name and the documented overrides it applies.
+    #[derive(Clone, Copy, Debug)]
+    struct Fixture<'a> {
+        name: &'a str,
+        overrides: &'a [(&'a str, &'a str)],
+    }
+
+    /// One documented override of the footprint defaults, and what it restores.
+    #[derive(Clone, Copy, Debug)]
+    struct OverrideCase {
+        fixture: &'static str,
+        variable: &'static str,
+        setting: &'static str,
+        expected: &'static str,
+    }
+
+    /// Runs `cargo build -v` in a fixture directory under a toolchain channel and the given
+    /// overrides, and returns what Cargo printed. A test of the parsing path passes a function
+    /// that returns canned text instead, so no process runs.
+    type CargoRunner = fn(&Utf8PathBuf, &str, &[(&str, &str)]) -> Result<String, String>;
+
+    /// The process adapter: the one place that runs the real Cargo.
+    fn real_cargo(
+        root: &Utf8PathBuf,
+        channel: &str,
+        overrides: &[(&str, &str)],
+    ) -> Result<String, String> {
         let mut command = Command::new("cargo");
         command
-            .arg(format!(
-                "+{}",
-                pinned_channel().expect("rust-toolchain.toml must name a channel")
-            ))
+            .arg(format!("+{channel}"))
             .args(["build", "--color", "never", "--offline", "-v"])
             .current_dir(root.as_std_path())
             .env("CARGO_TARGET_DIR", root.join("target").as_std_path());
         for variable in CLEARED {
             command.env_remove(variable);
         }
-        for (variable, setting) in extra_env {
+        for (variable, setting) in overrides {
             command.env(variable, setting);
         }
-        let output = command.output().expect("cargo must run");
+        let output = command
+            .output()
+            .map_err(|error| format!("running cargo: {error}"))?;
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        assert!(output.status.success(), "cargo build failed:\n{stderr}");
-        let Some(line) = stderr
+        if output.status.success() {
+            Ok(stderr)
+        } else {
+            Err(format!("cargo build failed:\n{stderr}"))
+        }
+    }
+
+    /// Returns the rustc command line for the fixture crate in Cargo's output.
+    fn rustc_line(stderr: &str) -> Result<String, String> {
+        stderr
             .lines()
             .find(|line| line.contains("Running") && line.contains("--crate-name footprint"))
-        else {
-            panic!("no rustc command line in Cargo's output:\n{stderr}");
-        };
-        line.to_owned()
+            .map(str::to_owned)
+            .ok_or_else(|| format!("no rustc command line in Cargo's output:\n{stderr}"))
+    }
+
+    /// Writes the fixture crate: a manifest, a library, and the repository's Cargo configuration.
+    fn write_fixture(root: &Utf8PathBuf) -> Result<(), String> {
+        let fail = |step: &'static str| move |error: std::io::Error| format!("{step}: {error}");
+        Dir::create_ambient_dir_all(root, ambient_authority())
+            .map_err(fail("creating the fixture directory"))?;
+        let dir = Dir::open_ambient_dir(root, ambient_authority())
+            .map_err(fail("opening the fixture directory"))?;
+        dir.create_dir_all("src").map_err(fail("creating src"))?;
+        dir.create_dir_all(".cargo")
+            .map_err(fail("creating .cargo"))?;
+        let manifest = FIXTURE_MANIFEST.to_owned();
+        dir.write("Cargo.toml", manifest)
+            .map_err(fail("writing Cargo.toml"))?;
+        dir.write("src/lib.rs", "pub fn footprint() {}\n")
+            .map_err(fail("writing the library"))?;
+        dir.write(".cargo/config.toml", CARGO_CONFIG)
+            .map_err(fail("writing the configuration"))
+    }
+
+    /// Builds the fixture crate with a runner and returns the rustc command line Cargo ran.
+    fn compile_fixture(runner: CargoRunner, case: &Fixture) -> Result<String, String> {
+        let root = Utf8PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(case.name);
+        write_fixture(&root)?;
+        let channel = pinned_channel().ok_or("rust-toolchain.toml must name a channel")?;
+        rustc_line(&runner(&root, &channel, case.overrides)?)
     }
 
     /// Scenario: a default development build.
@@ -190,20 +238,26 @@ mod cargo_boundary {
     /// Invariant: rustc gets no debug information and no incremental directory,
     /// and Cargo passes the native `embed-metadata=no` setting.
     #[test]
-    fn a_default_build_has_no_debug_info_or_incremental_state() {
-        let command = compile_fixture("footprint-default", &[]);
-        assert!(
-            !command.contains("-C debuginfo"),
-            "debug info must be off: {command}"
-        );
-        assert!(
-            !command.contains("-C incremental"),
-            "incremental must be off: {command}"
-        );
-        assert!(
-            command.contains("-Z embed-metadata=no"),
-            "Cargo must coordinate metadata natively: {command}"
-        );
+    fn a_default_build_has_no_debug_info_or_incremental_state() -> Result<(), String> {
+        let command = compile_fixture(
+            real_cargo,
+            &Fixture {
+                name: "footprint-default",
+                overrides: &[],
+            },
+        )?;
+        if command.contains("-C debuginfo") {
+            return Err(format!("debug info must be off: {command}"));
+        }
+        if command.contains("-C incremental") {
+            return Err(format!("incremental must be off: {command}"));
+        }
+        if !command.contains("-Z embed-metadata=no") {
+            return Err(format!(
+                "Cargo must coordinate metadata natively: {command}"
+            ));
+        }
+        Ok(())
     }
 
     /// Scenario: each documented override of the footprint defaults.
@@ -211,18 +265,61 @@ mod cargo_boundary {
     /// Invariant: `CARGO_PROFILE_DEV_DEBUG=true` restores debug information, and
     /// `CARGO_INCREMENTAL=1` restores incremental compilation.
     #[rstest]
-    #[case::debug("footprint-debug", "CARGO_PROFILE_DEV_DEBUG", "true", "-C debuginfo=2")]
-    #[case::incremental("footprint-incremental", "CARGO_INCREMENTAL", "1", "-C incremental=")]
+    #[case::debug(OverrideCase {
+        fixture: "footprint-debug",
+        variable: "CARGO_PROFILE_DEV_DEBUG",
+        setting: "true",
+        expected: "-C debuginfo=2",
+    })]
+    #[case::incremental(OverrideCase {
+        fixture: "footprint-incremental",
+        variable: "CARGO_INCREMENTAL",
+        setting: "1",
+        expected: "-C incremental=",
+    })]
     fn a_documented_override_restores_its_setting(
-        #[case] name: &str,
-        #[case] variable: &str,
-        #[case] setting: &str,
-        #[case] expected: &str,
-    ) {
-        let command = compile_fixture(name, &[(variable, setting)]);
-        assert!(
-            command.contains(expected),
-            "{variable}={setting} must restore the setting ({expected}): {command}"
-        );
+        #[case] case: OverrideCase,
+    ) -> Result<(), String> {
+        let overrides = [(case.variable, case.setting)];
+        let command = compile_fixture(
+            real_cargo,
+            &Fixture {
+                name: case.fixture,
+                overrides: &overrides,
+            },
+        )?;
+        if command.contains(case.expected) {
+            Ok(())
+        } else {
+            Err(format!(
+                "{}={} must restore the setting ({}): {command}",
+                case.variable, case.setting, case.expected
+            ))
+        }
+    }
+
+    /// Scenario: Cargo output with and without the fixture's rustc line, and a failed build.
+    ///
+    /// Invariant: the line is found beside other output, its absence and a failed build are
+    /// reported as errors rather than panics, and the runner is injectable.
+    #[test]
+    fn the_cargo_adapter_reports_a_missing_line_and_a_failed_build() -> Result<(), String> {
+        let found =
+            rustc_line("   Compiling footprint\n     Running `rustc --crate-name footprint`\n")?;
+        if !found.contains("--crate-name footprint") {
+            return Err(format!("read the wrong line: {found}"));
+        }
+        if rustc_line("   Compiling other\n").is_ok() {
+            return Err("a missing rustc line must be an error".to_owned());
+        }
+        let failing: CargoRunner = |_, _, _| Err("cargo build failed".to_owned());
+        let case = Fixture {
+            name: "footprint-failing",
+            overrides: &[],
+        };
+        if compile_fixture(failing, &case).is_ok() {
+            return Err("a failed build must be an error".to_owned());
+        }
+        Ok(())
     }
 }
