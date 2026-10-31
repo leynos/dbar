@@ -340,9 +340,8 @@ incremental builds). `.cargo/config.toml` also sets
 `[unstable] embed-metadata = false`, the native Cargo key for nightlies from
 2026-07-31, so Cargo coordinates metadata output itself. No raw rustc metadata
 flags are used, and the pin is not moved to suit the key.
-`tests/build_footprint_contract.rs` holds all three settings and proves them,
-with both overrides, at the Cargo boundary by building a one-file crate under
-the repository's own `[profile.dev]` table and Cargo configuration.
+`tests/build_footprint_contract.rs` holds all three settings and reads them by
+parsing the repository's own configuration. It starts no Cargo process.
 
 ### Whitaker isolation
 
