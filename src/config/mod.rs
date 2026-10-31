@@ -200,8 +200,7 @@ impl StatusArgs {
     #[must_use]
     pub fn pr_cache_ttl_or_default(&self) -> CacheTtlSeconds {
         self.pr_cache_ttl_seconds
-            .map(Into::into)
-            .unwrap_or_default()
+            .map_or_else(Default::default, Into::into)
     }
 }
 
@@ -233,8 +232,7 @@ impl RefreshArgs {
     #[must_use]
     pub fn pr_cache_ttl_or_default(&self) -> CacheTtlSeconds {
         self.pr_cache_ttl_seconds
-            .map(Into::into)
-            .unwrap_or_default()
+            .map_or_else(Default::default, Into::into)
     }
 }
 

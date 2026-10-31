@@ -111,17 +111,48 @@ pub fn commands_from(stdout: &str) -> Result<Vec<Assignment>, String> {
     let joined = stdout.replace("\\\n", " ");
     joined
         .lines()
-        .flat_map(shell_commands)
-        .map(|command| without_leading_keywords(&command).to_owned())
-        .filter(|command| !command.starts_with("echo"))
+        .flat_map(commands_after_any_cd)
+        .filter(|(command, _)| !command.starts_with("echo"))
         // A tool-availability probe names Cargo but runs no build.
-        .filter(|command| !command.starts_with("command -v"))
-        .filter(|command| command.contains("cargo") || command.contains("whitaker"))
-        .map(|command| match assigned_rustflags(&command)? {
+        .filter(|(command, _)| !command.starts_with("command -v"))
+        .filter(|(command, _)| command.contains("cargo") || command.contains("whitaker"))
+        .map(|(command, after_cd)| match assigned_rustflags(&command)? {
             Assignment::Unassigned if compiles(&command) => Ok(Assignment::Bare(command)),
+            // Whitaker runs under the toolchain its installer manages, so it takes none of the
+            // development standard. Its literal `RUSTFLAGS="-D warnings"` is the isolation
+            // boundary the build-defaults rule (BD-008) asks for, not a missing assignment, but
+            // only once the recipe has left the checkout: from inside it Cargo would still
+            // discover the checkout's `.cargo/config.toml` and its Cranelift profile.
+            Assignment::Flags(..) if after_cd && is_isolated_whitaker(&command) => {
+                Ok(Assignment::Unassigned)
+            }
             other => Ok(other),
         })
         .collect()
+}
+
+/// Splits one `make -n` line into its commands, each paired with whether a `cd` precedes it on
+/// the line, so the directory the recipe runs in is not lost when the line is read one command
+/// at a time.
+fn commands_after_any_cd(line: &str) -> Vec<(String, bool)> {
+    let mut after_cd = false;
+    shell_commands(line)
+        .into_iter()
+        .map(|raw| {
+            let command = without_leading_keywords(&raw).to_owned();
+            let preceded = after_cd;
+            after_cd |= command.starts_with("cd ");
+            (command, preceded)
+        })
+        .collect()
+}
+
+/// Returns whether a command is Whitaker under the literal warning-only `RUSTFLAGS` boundary.
+fn is_isolated_whitaker(command: &str) -> bool {
+    command
+        .strip_prefix("RUSTFLAGS=\"-D warnings\" ")
+        .and_then(|rest| rest.split_whitespace().next())
+        .is_some_and(|binary| binary.rsplit('/').next() == Some("whitaker"))
 }
 
 /// A Makefile target name, typed so a runner takes a target and not just any text.

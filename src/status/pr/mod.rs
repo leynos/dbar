@@ -292,8 +292,7 @@ fn decide_without_a_pr(branch: &str) -> PrDecision {
     let persist = PersistRequest::Store(
         pr_number
             .as_ref()
-            .map(ToString::to_string)
-            .unwrap_or_default(),
+            .map_or_else(Default::default, ToString::to_string),
     );
     let resolution = if pr_number.is_some() {
         PrResolution::BranchFallback

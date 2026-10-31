@@ -59,3 +59,35 @@ the workflows, so a flag lost through a recipe or workflow edit fails there.
 - A change to a recipe or workflow step that assigns `RUSTFLAGS` must restate
   the flags, and the contract says which clause fails when it does not.
 - Re-measure the suite under Cranelift on the next toolchain bump.
+
+## Addendum, 2026-10-31: Whitaker is isolated from the standard
+
+The decision above says the Makefile composes the standard flags into each
+development recipe. That holds for Cargo gate builds, and no longer for
+Whitaker. The Concordat `rust-build-defaults` rule (BD-008) reads a direct
+installer-managed Whitaker route as its own boundary: Whitaker runs under the
+toolchain its installer manages, not this repository's pin, so it takes none of
+the development standard.
+
+- `make lint` runs Whitaker as `RUSTFLAGS="-D warnings" $(WHITAKER)` after a
+  `cd` to the checkout's parent, with `--manifest-path` naming the checkout.
+  The literal `RUSTFLAGS` displaces the `rustflags` sources, so Whitaker gets
+  no parallel frontend flag and no `mold` linker flag, and it inherits nothing
+  from the caller. Starting in the checkout's parent, Cargo never discovers
+  `.cargo/config.toml`, so the Cranelift profile stays out of the
+  installer-managed toolchain too.
+- Consequence: Whitaker links with the platform linker, and a caller's
+  `RUSTFLAGS` no longer reaches it.
+- `tests/build_standard_support/make.rs` reads an isolated Whitaker command as
+  exempt from the restatement clauses only when a `cd` precedes it on the
+  recipe line; `tests/whitaker_isolation_contract.rs` proves the parent
+  directory, the absolute manifest path and the literal `RUSTFLAGS` against the
+  real `make -n lint` output, and the empty `rustflags` input of the
+  `unix-only-build-contract` job's `setup-rust` step.
+- The `unix-only-build-contract` job passes `rustflags: ''` to `setup-rust`, so
+  its `cargo check` reads the repository's Cargo configuration instead of the
+  action's exported `-D warnings` (BD-009).
+- The development profile also sets `incremental = false` and `debug = 0`, and
+  `.cargo/config.toml` the native `[unstable] embed-metadata = false` key for
+  the dated nightly (the `rust-dev-build-footprint` rule), described in the
+  developers' guide.

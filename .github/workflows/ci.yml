@@ -19,6 +19,9 @@ jobs:
         with:
           install-mold: 'true'
           expect-cache: any
+          # Export no RUSTFLAGS, so the check below reads the repository's Cargo
+          # configuration (the frontend flag and, on Linux, mold) like a bare build.
+          rustflags: ''
       - name: Verify non-Unix builds are rejected
         run: |
           rustup target add x86_64-pc-windows-gnu

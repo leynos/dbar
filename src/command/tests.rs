@@ -102,7 +102,7 @@ fn run_returns_promptly_when_a_descendant_outlives_the_child() {
     let output = runner.run(&spec).expect("child exits successfully");
     let elapsed = started.elapsed();
 
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, "");
     assert!(
         elapsed < Duration::from_secs(5),
         "run() must not wait on a surviving descendant, took {elapsed:?}"
