@@ -127,7 +127,7 @@ mod cargo_boundary {
     use super::{CARGO_CONFIG, pinned_channel};
 
     /// Variables that would add a wrapper or override the profile under test.
-    const CLEARED: [&str; 11] = [
+    const CLEARED: [&str; 12] = [
         "RUSTC_WRAPPER",
         "RUSTC_WORKSPACE_WRAPPER",
         "CARGO_BUILD_RUSTC_WRAPPER",
@@ -137,6 +137,7 @@ mod cargo_boundary {
         "RUSTFLAGS",
         "CARGO_INCREMENTAL",
         "CARGO_BUILD_INCREMENTAL",
+        "CARGO_BUILD_BUILD_DIR",
         "CARGO_PROFILE_DEV_DEBUG",
         "CARGO_PROFILE_DEV_INCREMENTAL",
     ];
@@ -225,12 +226,30 @@ mod cargo_boundary {
             .map_err(fail("writing the configuration"))
     }
 
-    /// Builds the fixture crate with a runner and returns the rustc command line Cargo ran.
-    fn compile_fixture(runner: CargoRunner, case: &Fixture) -> Result<String, String> {
-        let root = Utf8PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(case.name);
-        write_fixture(&root)?;
+    /// Builds the fixture crate in `root` with a runner and returns the rustc command line Cargo
+    /// ran.
+    fn build_fixture(
+        runner: CargoRunner,
+        root: &Utf8PathBuf,
+        case: &Fixture,
+    ) -> Result<String, String> {
+        write_fixture(root)?;
         let channel = pinned_channel().ok_or("rust-toolchain.toml must name a channel")?;
-        rustc_line(&runner(&root, &channel, case.overrides)?)
+        rustc_line(&runner(root, &channel, case.overrides)?)
+    }
+
+    /// Builds the fixture crate in a directory of its own, so two test processes cannot share
+    /// one, removes it afterwards, and returns the rustc command line Cargo ran.
+    fn compile_fixture(runner: CargoRunner, case: &Fixture) -> Result<String, String> {
+        let root = Utf8PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+            "{}-{}",
+            case.name,
+            std::process::id()
+        ));
+        let built = build_fixture(runner, &root, case);
+        // The build's result matters more than tidying up after it.
+        std::fs::remove_dir_all(root.as_std_path()).ok();
+        built
     }
 
     /// Scenario: a default development build.
