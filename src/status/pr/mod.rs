@@ -289,7 +289,11 @@ pub fn decide(lookup: Result<Option<PrNumber>, GitHubLookupFailure>, branch: &st
 /// Decide what to render and persist when GitHub reported no PR.
 fn decide_without_a_pr(branch: &str) -> PrDecision {
     let pr_number = pr_from_branch(branch);
-    let persist = PersistRequest::Store(pr_number.as_ref().map_or_default(ToString::to_string));
+    let persist = PersistRequest::Store(
+        pr_number
+            .as_ref()
+            .map_or_else(Default::default, ToString::to_string),
+    );
     let resolution = if pr_number.is_some() {
         PrResolution::BranchFallback
     } else {
