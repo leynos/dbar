@@ -122,10 +122,11 @@ fn named_branch_runner() -> MockCommandRunner {
     .collect();
     let mut runner = MockCommandRunner::new();
     runner.expect_run().returning(move |spec| {
-        answers.get(spec).map_or_else(
-            || Err(CommandError::NonZero { status: Some(1) }),
-            |stdout| Ok(CommandOutput::from_stdout(stdout.clone())),
-        )
+        answers
+            .get(spec)
+            .map_or(Err(CommandError::NonZero { status: Some(1) }), |stdout| {
+                Ok(CommandOutput::from_stdout(stdout.clone()))
+            })
     });
     runner
 }
