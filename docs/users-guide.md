@@ -223,4 +223,4 @@ yourself, for example `RUSTFLAGS="" cargo build --release`.
 
 Cranelift is the development-profile code generator, selected in
 `.cargo/config.toml`; coverage selects LLVM explicitly because instrumentation
-needs it. See [ADR 001](adr-001-rust-build-standard.md) for the reasoning.
+needs it. See [ADR 001](adrs/adr-0001-rust-build-standard.md) for the reasoning.
