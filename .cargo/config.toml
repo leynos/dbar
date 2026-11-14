@@ -16,9 +16,9 @@ codegen-backend = true
 # Never use raw rustc metadata flags; they broke build scripts.
 embed-metadata = false
 
+[profile.dev]
 # Cranelift disabled estate-wide on 14 November 2026 (concordat ADR; review 14 May 2027). Uncomment to opt back in.
 # codegen-backend = "cranelift"
-[profile.dev]
 incremental = false
 debug = 0
 
