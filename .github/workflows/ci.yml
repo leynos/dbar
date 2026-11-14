@@ -65,8 +65,8 @@ jobs:
       - name: Install Whitaker Dylint suite
         uses: leynos/shared-actions/.github/actions/install-whitaker@fc0e10220207b951bf693aba2ce4f9dafc1a0206
         with:
-          # The dev profile builds with the Cranelift backend, so the lint suite's
-          # toolchain needs rustc-codegen-cranelift too.
+          # Cranelift is an opt-in backend, and the lint suite's toolchain
+          # keeps rustc-codegen-cranelift so the opt-in works there too.
           cranelift: 'true'
       - name: Lint
         run: make lint
