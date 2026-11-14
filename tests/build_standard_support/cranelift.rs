@@ -14,7 +14,7 @@ use super::ci_steps::{Workflow, cranelift_workflow_problems, whitaker_cranelift_
 use super::config::{CONFIG, Problems, TOOLCHAIN};
 
 /// Whether this repository selects Cranelift for the development profile.
-pub const SELECTED: bool = true;
+pub const SELECTED: bool = false;
 
 /// The component a toolchain must ship for the backend.
 const COMPONENT: &str = "rustc-codegen-cranelift-preview";

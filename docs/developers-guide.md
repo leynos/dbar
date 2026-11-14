@@ -363,16 +363,15 @@ configuration instead of the flags the setup action exports.
 
 ### Cranelift
 
-Cranelift is the development-profile codegen backend. The full suite was
-measured under it on the pinned `nightly-2026-10-30` on 2026-10-31: `make test`
-ran 396 tests across the test binaries and the doctests, and all pass (the
-earlier measurement, on `nightly-2025-12-12` on 2026-09-29, passed all 292
-tests then). Coverage selects LLVM explicitly
-(`CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm`), because instrumentation needs it,
-and release builds use the release profile, which Cranelift does not touch.
-Re-measure the whole suite on the next toolchain bump; if it fails, record the
-failing tests here as an exception and remove the backend from
-`.cargo/config.toml`.
+LLVM is the default codegen backend: the estate standard dropped Cranelift,
+with review due 14 May 2027 (see the
+[concordat decision record](https://github.com/leynos/concordat/blob/main/docs/adrs/adr-0004-cranelift-is-not-part-of-the-rust-build-standard.md)).
+The Cranelift selection in `.cargo/config.toml` is commented out. To opt in,
+pass `--config 'profile.dev.codegen-backend="cranelift"'`; Cranelift does not
+unwind, so no test may rely on a caught panic under it. An inherited
+`CARGO_PROFILE_*_CODEGEN_BACKEND` can still select it. Coverage selects LLVM
+explicitly (`CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm`), because instrumentation
+needs it, and release builds use the release profile.
 
 ## Testing guidance
 
