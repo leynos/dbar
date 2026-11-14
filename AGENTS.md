@@ -235,8 +235,9 @@ project:
     standard below). Whitaker runs from the checkout's parent directory with
     `RUSTFLAGS="-D warnings"` only, because it runs under the toolchain its
     installer manages. Clippy warnings and Whitaker findings fail the command.
-    The `cargo doc` step does not deny warnings, because the Makefile sets
-    `RUSTDOCFLAGS` from a `RUSTDOC_FLAGS` variable that it never defines.
+    The `cargo doc` step does not deny warnings by default, because the
+    Makefile sets `RUSTDOCFLAGS` from a `RUSTDOC_FLAGS` variable that it never
+    defines.
   - `make test` executes:
 
     ```sh
@@ -252,15 +253,17 @@ project:
     It runs `cargo fmt --all`, `mdtablefix --in-place`, and
     `markdownlint-cli2 --fix` over the Markdown files.
 - Development builds use the parallel `rustc` frontend (`-Zthreads=8`) and, on
-  Linux, the `mold` linker (`-Clink-arg=-fuse-ld=mold`). The flags come from
-  `.cargo/config.toml`, which also sets the dev profile to
-  `incremental = false` and `debug = 0`. Install `mold` before building on
-  Linux, because the configuration names it. `make build`, `make test`,
-  `make lint`, and `make typecheck` compose these flags onto any inherited
-  `RUSTFLAGS`, and `make release` and the coverage workflow keep the platform
-  linker. The build standard needs the dated nightly pinned in
-  `rust-toolchain.toml`. LLVM is the default code generator, and Cranelift is
-  opt-in only, disabled in `.cargo/config.toml`; see
+  Linux, the `mold` linker (`-Clink-arg=-fuse-ld=mold`). `.cargo/config.toml`
+  defines these flags and the dev profile (`incremental = false`, `debug = 0`),
+  and the Makefile repeats the flags in `STANDARD_RUSTFLAGS`. Install `mold`
+  before building on Linux, because the configuration names it. `make build`,
+  `make test`, `make typecheck`, and the `cargo doc` and Clippy steps of
+  `make lint` compose `STANDARD_RUSTFLAGS` onto any inherited `RUSTFLAGS`.
+  `make release` keeps the inherited `RUSTFLAGS` and adds none of the standard
+  flags, and the coverage workflow sets only `-D warnings`. The build standard
+  needs the dated nightly pinned in `rust-toolchain.toml`. LLVM is the default
+  code generator, and Cranelift is opt-in only, disabled in
+  `.cargo/config.toml`; see
   [ADR 001](docs/adrs/adr-0001-rust-build-standard.md).
 - Clippy warnings MUST be disallowed.
 - Fix any warnings emitted during tests in the code itself rather than
