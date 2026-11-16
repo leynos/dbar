@@ -385,9 +385,9 @@ project:
   tests that run many cases within one process, and leaves the ambient
   dependency embedded in the production signature. Where injection looks
   impossible the signature is wrong; correct the signature. In this repository
-  the accepted local form is the shared `EnvGuard` in `src/test_support.rs`,
-  used because `ortho_config` cannot be given an injected environment; new
-  environment-dependent tests reuse it rather than adding a second lock.
+  configuration tests inject an `ortho_config::MapEnv` through
+  `load_command_from_with_env`, and `clippy.toml` disallows `std::env::set_var`,
+  `remove_var` and `set_current_dir`.
 - **Subprocess isolation is the sole exemption.** End-to-end behavioural tests
   invoking the generated application binary through `assert_cmd` may configure
   the environment via `Command::env`/`Command::env_clear`, because the mutation

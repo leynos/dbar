@@ -23,8 +23,6 @@ mod github;
 mod install;
 mod render;
 mod status;
-#[cfg(test)]
-mod test_support;
 mod tmux;
 mod types;
 

@@ -156,24 +156,44 @@ fn the_development_policy_runs_against_an_injected_runner() -> Result<(), String
 fn a_development_command_without_an_assignment_is_refused_and_an_exempt_one_is_not()
 -> Result<(), String> {
     let pin = Pin::Nightly;
+    ensure_bare_test_command_refused(pin)?;
+    ensure_bare_lint_command_refused(pin)?;
+    ensure_chained_bare_command_refused(pin)?;
+    ensure_exempt_commands_accepted(pin)
+}
+
+/// Checks that a test command assigning no `RUSTFLAGS` is refused.
+fn ensure_bare_test_command_refused(pin: Pin) -> Result<(), String> {
     let (bare_test, _) = development_problems(bare_test_make, Host::Linux, pin)?;
     ensure(
         !bare_test.is_empty(),
         "a test command that assigns no RUSTFLAGS passed",
-    )?;
+    )
+}
+
+/// Checks that lint commands assigning no `RUSTFLAGS` are refused.
+fn ensure_bare_lint_command_refused(pin: Pin) -> Result<(), String> {
     let (bare_lint, _) = development_problems(bare_lint_make, Host::Linux, pin)?;
     ensure(
         !bare_lint.is_empty(),
         "lint commands that assign no RUSTFLAGS passed",
-    )?;
+    )
+}
+
+/// Checks that a bare command chained beside an assigning probe is refused, and only that one.
+fn ensure_chained_bare_command_refused(pin: Pin) -> Result<(), String> {
     let (chained, _) = development_problems(chained_bare_make, Host::Linux, pin)?;
+    let all_name_the_bare_command = chained
+        .iter()
+        .all(|problem| problem.contains("nextest run"));
     ensure(
-        !chained.is_empty()
-            && chained
-                .iter()
-                .all(|problem| problem.contains("nextest run")),
+        !chained.is_empty() && all_name_the_bare_command,
         &format!("a bare command chained beside an assigning probe raised {chained:?}"),
-    )?;
+    )
+}
+
+/// Checks that a formatter, a metadata probe and a documentation build are not refused.
+fn ensure_exempt_commands_accepted(pin: Pin) -> Result<(), String> {
     let (exempt, exempt_read) = development_problems(exempt_commands_make, Host::Linux, pin)?;
     ensure(
         exempt.is_empty() && exempt_read > 0,
@@ -300,15 +320,33 @@ fn a_release_command_is_accepted_only_when_it_keeps_the_callers_rustflags() -> R
 /// runner error reaches the caller.
 #[test]
 fn the_held_out_policy_runs_against_an_injected_runner() -> Result<(), String> {
+    ensure_runner_error_reaches_the_caller()?;
+    ensure_assigning_command_is_clean()?;
+    ensure_measurement_and_inspection_are_not_refused()?;
+    ensure_unassigned_command_is_refused()?;
+    ensure_listed_targets_are_run()
+}
+
+/// Checks that a runner error is returned rather than swallowed.
+fn ensure_runner_error_reaches_the_caller() -> Result<(), String> {
     ensure(
         held_out_problems_for(undefined_make, &["synthetic"]).is_err(),
         "a held-out runner error was swallowed",
-    )?;
+    )
+}
+
+/// Checks that a held-out command assigning `RUSTFLAGS` raises nothing and is read once.
+fn ensure_assigning_command_is_clean() -> Result<(), String> {
     let (clean, read) = held_out_problems_for(held_out_assigning_make, &["synthetic"])?;
     ensure(
         clean.is_empty() && read == 1,
         &format!("an assigning held-out command raised {clean:?}"),
-    )?;
+    )
+}
+
+/// Checks that a coverage build, a measurement, may ignore the caller's flags, and that an
+/// inspection command in a held-out target is not refused.
+fn ensure_measurement_and_inspection_are_not_refused() -> Result<(), String> {
     let (measuring, _) = held_out_problems_for(release_clearing_make, &["coverage"])?;
     ensure(
         measuring.is_empty(),
@@ -318,12 +356,20 @@ fn the_held_out_policy_runs_against_an_injected_runner() -> Result<(), String> {
     ensure(
         inspecting.is_empty(),
         &format!("an inspection command in a held-out target raised {inspecting:?}"),
-    )?;
+    )
+}
+
+/// Checks that a held-out command assigning no `RUSTFLAGS` is refused.
+fn ensure_unassigned_command_is_refused() -> Result<(), String> {
     let (unassigned, _) = held_out_problems_for(held_out_unassigned_make, &["synthetic"])?;
     ensure(
         !unassigned.is_empty(),
         "a held-out command that assigns no RUSTFLAGS passed",
-    )?;
+    )
+}
+
+/// Checks that the listed held-out targets were run, when any are listed.
+fn ensure_listed_targets_are_run() -> Result<(), String> {
     ensure(
         held_out_target_count() == 0 || held_out_problems(undefined_make).is_err(),
         "the listed held-out targets were not run",
