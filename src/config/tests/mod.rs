@@ -43,7 +43,7 @@ fn isolated_env() -> MapEnv {
         .with_current_dir(NOWHERE)
         .with_var("HOME", NOWHERE)
         .with_var("XDG_CONFIG_HOME", NOWHERE)
-        .with_var("XDG_CONFIG_DIRS", "")
+        .with_var("XDG_CONFIG_DIRS", NOWHERE)
 }
 
 /// The isolated environment with `HOME` named as the directory of `file`.
