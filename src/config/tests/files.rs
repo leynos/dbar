@@ -20,9 +20,8 @@ const FILE_CONTENTS: &str = concat!(
 )]
 fn configuration_file_values_are_loaded() -> Result<(), FixtureError> {
     let file = config_home(FILE_CONTENTS)?;
-    let _env = EnvGuard::set(&ISOLATING).and(&[("HOME", file.home.as_str())]);
 
-    let args = status_of(load_command_from(["dbar", "status"]).expect("status parses"));
+    let args = status_of(load(home_env(&file), ["dbar", "status"]).expect("status parses"));
     assert_eq!(args.session.as_deref(), Some("from-file"));
     assert_eq!(args.github_mock_pr.as_deref(), Some("pr-from-file"));
     Ok(())
@@ -39,11 +38,10 @@ fn the_configuration_file_overrides_the_documented_defaults() -> Result<(), Fixt
         "position = \"right\"\n",
         "path = \"/tmp/from-file.tmux.conf\"\n",
     ))?;
-    let _env = EnvGuard::set(&ISOLATING).and(&[("HOME", file.home.as_str())]);
 
     // The documented defaults are `left` and the home directory's `.tmux.conf`;
     // both differ from the file's values, so the file must be what won.
-    let args = install_of(load_command_from(["dbar", "install"]).expect("install parses"));
+    let args = install_of(load(home_env(&file), ["dbar", "install"]).expect("install parses"));
     assert_eq!(args.position.map(Into::into), Some(StatusPosition::Right));
     assert_eq!(
         args.path.as_deref().map(camino::Utf8Path::as_str),
@@ -60,12 +58,9 @@ fn the_configuration_file_overrides_the_documented_defaults() -> Result<(), Fixt
 )]
 fn the_environment_overrides_the_configuration_file() -> Result<(), FixtureError> {
     let file = config_home(FILE_CONTENTS)?;
-    let _env = EnvGuard::set(&ISOLATING).and(&[
-        ("HOME", file.home.as_str()),
-        ("DBAR_CMDS_STATUS_SESSION", "from-env"),
-    ]);
+    let env = home_env(&file).with_var("DBAR_CMDS_STATUS_SESSION", "from-env");
 
-    let args = status_of(load_command_from(["dbar", "status"]).expect("status parses"));
+    let args = status_of(load(env, ["dbar", "status"]).expect("status parses"));
     assert_eq!(args.session.as_deref(), Some("from-env"));
     // The file still supplies the values the environment leaves alone, proving
     // the file layer was loaded rather than skipped.
@@ -80,14 +75,10 @@ fn the_environment_overrides_the_configuration_file() -> Result<(), FixtureError
 )]
 fn the_command_line_overrides_the_configuration_file_and_environment() -> Result<(), FixtureError> {
     let file = config_home(FILE_CONTENTS)?;
-    let _env = EnvGuard::set(&ISOLATING).and(&[
-        ("HOME", file.home.as_str()),
-        ("DBAR_CMDS_STATUS_SESSION", "from-env"),
-    ]);
+    let env = home_env(&file).with_var("DBAR_CMDS_STATUS_SESSION", "from-env");
 
-    let args = status_of(
-        load_command_from(["dbar", "status", "--session", "from-cli"]).expect("status parses"),
-    );
+    let args =
+        status_of(load(env, ["dbar", "status", "--session", "from-cli"]).expect("status parses"));
     assert_eq!(args.session.as_deref(), Some("from-cli"));
     Ok(())
 }
@@ -99,9 +90,9 @@ fn the_command_line_overrides_the_configuration_file_and_environment() -> Result
 )]
 fn malformed_configuration_files_are_reported_rather_than_exiting() -> Result<(), FixtureError> {
     let file = config_home("[cmds.status\nsession = \"unterminated\n")?;
-    let _env = EnvGuard::set(&ISOLATING).and(&[("HOME", file.home.as_str())]);
 
-    let err = load_command_from(["dbar", "status"]).expect_err("a malformed file must be rejected");
+    let err =
+        load(home_env(&file), ["dbar", "status"]).expect_err("a malformed file must be rejected");
     assert!(
         matches!(err, ConfigError::Merge(_)),
         "expected a merge error, got {err:?}"
@@ -111,12 +102,11 @@ fn malformed_configuration_files_are_reported_rather_than_exiting() -> Result<()
 
 #[rstest]
 fn install_environment_values_apply_when_the_command_line_is_silent() {
-    let _env = EnvGuard::set(&ISOLATING).and(&[
-        ("DBAR_CMDS_INSTALL_POSITION", "right"),
-        ("DBAR_CMDS_INSTALL_PATH", "/tmp/from-env.tmux.conf"),
-    ]);
+    let env = isolated_env()
+        .with_var("DBAR_CMDS_INSTALL_POSITION", "right")
+        .with_var("DBAR_CMDS_INSTALL_PATH", "/tmp/from-env.tmux.conf");
 
-    let args = install_of(load_command_from(["dbar", "install"]).expect("install parses"));
+    let args = install_of(load(env, ["dbar", "install"]).expect("install parses"));
     assert_eq!(args.position.map(Into::into), Some(StatusPosition::Right));
     assert_eq!(
         args.path.as_deref().map(camino::Utf8Path::as_str),
@@ -135,9 +125,8 @@ fn install_configuration_file_values_are_loaded() -> Result<(), FixtureError> {
         "position = \"right\"\n",
         "path = \"/tmp/from-file.tmux.conf\"\n",
     ))?;
-    let _env = EnvGuard::set(&ISOLATING).and(&[("HOME", file.home.as_str())]);
 
-    let args = install_of(load_command_from(["dbar", "install"]).expect("install parses"));
+    let args = install_of(load(home_env(&file), ["dbar", "install"]).expect("install parses"));
     assert_eq!(args.position.map(Into::into), Some(StatusPosition::Right));
     assert_eq!(
         args.path.as_deref().map(camino::Utf8Path::as_str),

@@ -36,70 +36,15 @@ use clap::{Parser, Subcommand};
 use directories::BaseDirs;
 use ortho_config::OrthoConfig;
 use ortho_config::SubcmdConfigMerge;
+use ortho_config::{EnvSource, ProcessEnv, ScanEnvSource};
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::types::{CacheTtlSeconds, StatusPosition};
+use crate::types::CacheTtlSeconds;
 
-/// Configuration-layer representation of a cache TTL.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ConfigCacheTtlSeconds(u64);
+mod values;
 
-impl ConfigCacheTtlSeconds {
-    /// Create a configuration-layer TTL from an already parsed value.
-    pub const fn new(value: u64) -> Self {
-        Self(value)
-    }
-}
-
-impl FromStr for ConfigCacheTtlSeconds {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        value
-            .parse()
-            .map(Self::new)
-            .map_err(|error| format!("invalid cache ttl: {error}"))
-    }
-}
-
-impl From<ConfigCacheTtlSeconds> for CacheTtlSeconds {
-    fn from(value: ConfigCacheTtlSeconds) -> Self {
-        Self::new(value.0)
-    }
-}
-
-/// Configuration-layer representation of the tmux status placement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ConfigStatusPosition {
-    /// Write the left tmux status segment.
-    Left,
-    /// Write the right tmux status segment.
-    Right,
-}
-
-impl FromStr for ConfigStatusPosition {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "left" => Ok(Self::Left),
-            "right" => Ok(Self::Right),
-            _ => Err(format!("invalid status position: {value}")),
-        }
-    }
-}
-
-impl From<ConfigStatusPosition> for StatusPosition {
-    fn from(value: ConfigStatusPosition) -> Self {
-        match value {
-            ConfigStatusPosition::Left => Self::Left,
-            ConfigStatusPosition::Right => Self::Right,
-        }
-    }
-}
+pub use values::{ConfigCacheTtlSeconds, ConfigStatusPosition};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -350,14 +295,45 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    merge_command(Cli::try_parse_from(args).map_err(Box::new)?)
+    load_command_from_with_env(args, Arc::new(ProcessEnv))
 }
 
-fn merge_command(cli: Cli) -> Result<DbarCommand, ConfigError> {
+/// Load a command from an explicit argument list and an injected environment.
+///
+/// The environment answers the lookups that locate configuration files, supplies
+/// the working directory, and backs the `DBAR_CMDS_<NAME>_*` variable layer, so
+/// a caller that pins all three reads nothing from the process.
+/// [`load_command_from`] passes [`ProcessEnv`], which preserves the ambient
+/// behaviour.
+///
+/// # Errors
+///
+/// Returns [`ConfigError::Cli`] when the arguments do not parse and
+/// [`ConfigError::Merge`] when environment or configuration-file merging fails.
+///
+/// # Examples
+///
+/// ```text
+/// let env = MapEnv::new().with_current_dir("/nonexistent").with_var("HOME", "/nonexistent");
+/// let command = load_command_from_with_env(["dbar", "status"], Arc::new(env))?;
+/// ```
+pub fn load_command_from_with_env<I, T, E>(args: I, env: Arc<E>) -> Result<DbarCommand, ConfigError>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+    E: EnvSource + ScanEnvSource + 'static,
+{
+    merge_command(Cli::try_parse_from(args).map_err(Box::new)?, env)
+}
+
+fn merge_command<E>(cli: Cli, env: Arc<E>) -> Result<DbarCommand, ConfigError>
+where
+    E: EnvSource + ScanEnvSource + 'static,
+{
     match cli.command {
-        Commands::Status(args) => Ok(DbarCommand::Status(args.load_and_merge()?)),
-        Commands::Refresh(args) => Ok(DbarCommand::Refresh(args.load_and_merge()?)),
-        Commands::Install(args) => Ok(DbarCommand::Install(args.load_and_merge()?)),
+        Commands::Status(args) => Ok(DbarCommand::Status(args.load_and_merge_with_env(env)?)),
+        Commands::Refresh(args) => Ok(DbarCommand::Refresh(args.load_and_merge_with_env(env)?)),
+        Commands::Install(args) => Ok(DbarCommand::Install(args.load_and_merge_with_env(env)?)),
     }
 }
 

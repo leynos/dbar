@@ -231,6 +231,21 @@ time:
   `FileCacheStorage` is constructed at the CLI composition boundary, so the
   status policy does not depend on the filesystem adapter.
 
+- `config::load_command_from_with_env` — loads a command from an argument list
+  and one injected environment that backs both configuration-file discovery and
+  the `DBAR_CMDS_<NAME>_*` variable layer (`E: EnvSource + ScanEnvSource`).
+  `load_command_from` passes `ortho_config::ProcessEnv`, so the command line
+  keeps its ambient behaviour; `load_command` reads `std::env::args_os()` and
+  nothing else. Configuration tests pass a closed `MapEnv` instead. A hermetic
+  case pins the working directory with `MapEnv::with_current_dir` and names
+  `HOME`, `XDG_CONFIG_HOME` and `XDG_CONFIG_DIRS` as a directory no test
+  creates, because an empty `XDG_CONFIG_DIRS` selects `/etc/xdg` and an unset
+  `HOME` falls back to the host. A case that needs a configuration file writes
+  `.dbar.toml` into a temporary directory and names `HOME` as it
+  (`src/config/tests/mod.rs`). `clippy.toml` disallows `std::env::set_var`,
+  `remove_var` and `set_current_dir`, so a test cannot mutate the process
+  instead.
+
 These traits exist so unit and behavioural tests stay hermetic: no test needs
 network access, a real `git`/`gh`/`tmux` binary, or environment-variable
 mutation to exercise the orchestration logic in `git/mod.rs`, `tmux/mod.rs`, and
