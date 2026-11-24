@@ -275,18 +275,33 @@ fn report_install_outcome(
     outcome: &install::InstallOutcome,
 ) -> io::Result<()> {
     if outcome.is_dry_run {
-        write_line(writer, &format!("Dry run for {}:", outcome.path))?;
-        write_line(writer, &outcome.snippet)?;
+        report_dry_run(writer, outcome)?;
     } else if outcome.is_updated {
-        write_line(writer, &format!("Updated tmux config at {}", outcome.path))?;
-        if let Some(backup) = outcome.backup_path.as_ref() {
-            write_line(writer, &format!("Backup written to {backup}"))?;
-        }
+        report_update(writer, outcome)?;
     } else {
-        write_line(
-            writer,
-            &format!("tmux config already up to date at {}", outcome.path),
-        )?;
+        report_up_to_date(writer, outcome)?;
     }
     flush_writer(writer)
+}
+
+/// Print the snippet a dry run would have installed.
+fn report_dry_run(writer: &mut impl Write, outcome: &install::InstallOutcome) -> io::Result<()> {
+    write_line(writer, &format!("Dry run for {}:", outcome.path))?;
+    write_line(writer, &outcome.snippet)
+}
+
+/// Print that the config was updated, and where its backup went when one was written.
+fn report_update(writer: &mut impl Write, outcome: &install::InstallOutcome) -> io::Result<()> {
+    write_line(writer, &format!("Updated tmux config at {}", outcome.path))?;
+    outcome.backup_path.as_ref().map_or(Ok(()), |backup| {
+        write_line(writer, &format!("Backup written to {backup}"))
+    })
+}
+
+/// Print that the config needed no change.
+fn report_up_to_date(writer: &mut impl Write, outcome: &install::InstallOutcome) -> io::Result<()> {
+    write_line(
+        writer,
+        &format!("tmux config already up to date at {}", outcome.path),
+    )
 }
