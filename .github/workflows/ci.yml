@@ -72,6 +72,8 @@ jobs:
           # Cranelift is an opt-in backend, and the lint suite's toolchain
           # keeps rustc-codegen-cranelift so the opt-in works there too.
           cranelift: 'true'
+      - name: Install the YAML lint tools
+        uses: leynos/shared-actions/.github/actions/install-yaml-lint@bd052c68a4792e92c3272fb1b6ea3b594f3ab7f3
       - name: Lint
         run: make lint
       - name: Workflow contract tests
