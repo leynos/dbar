@@ -541,12 +541,14 @@ and the run still succeeds.
 `CV005_CONTRACTS_REF` in the `Makefile` (a bump of that pin is a reviewed
 change, never a silent upgrade), then the local wiring tests in
 `tests/workflow_contracts`. It needs `uv`, Python 3.13 for the checker, and
-`pytest` and `pyyaml`, which `uv run --with` supplies. Both runs go through
-`UV` and `UV_ENV`, so a `uv` outside `PATH` can be injected. `make all` and CI
-run the target; `.github/cv005.toml` holds the repository name and nothing
-else. A Dependabot pull request merged by the automerge workflow fires no push
-event, so that merge publishes nothing until the next push to `main`
-(shared-actions #518 tracks the fix).
+`pytest` and `pyyaml`, pinned in the `Makefile`. Both runs go through the
+vendored `scripts/uv_gate.py` helper (`UV_GATE`), which needs `python3` 3.9 or
+newer, finds `uv` on `PATH` (outside `~/.lody`) and runs offline first with at
+most one online attempt; there is no `UV` override. `make all` and CI run the
+target; `.github/cv005.toml` holds the repository name and nothing else. A
+Dependabot pull request merged by the automerge workflow fires no push event,
+so that merge publishes nothing until the next push to `main` (shared-actions
+issue 518 tracks the fix).
 
 ## YAML lint
 

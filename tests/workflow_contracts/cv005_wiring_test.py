@@ -63,7 +63,7 @@ def test_the_target_runs_the_pinned_checker_on_this_repository() -> None:
     runs = [line for line in commands.splitlines() if "cv005-contracts" in line]
     assert len(runs) == 1, f"expected one checker invocation, got {runs!r}"
     run = runs[0]
-    assert "scripts/uv_gate.py tool" in run, run
+    assert "uv tool run" not in run, run  # routed through the helper, whatever its path
     assert "--python 3.13" in run, run
     assert f"--from '{source}'" in run, run
     assert run.rstrip().endswith("cv005-contracts check --repository ."), run
