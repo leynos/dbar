@@ -221,7 +221,8 @@ project:
     checking Rust formatting for every package and Markdown table formatting
     without modifying files. `mdtablefix` must be version 0.6.0 or later.
   - `make lint` first runs `make interrogate`, which needs `uv` and fails on any
-    Python definition under `tests` without a docstring (and on any `MISSED`
+    Python definition under `scripts` or `tests` without a docstring (and on
+    any `MISSED`
     row, since interrogate rounds its percentage to one decimal;
     `tests/workflow_contracts/interrogate_gate_test.py` asserts the wiring).
     It then executes:

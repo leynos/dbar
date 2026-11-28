@@ -284,8 +284,8 @@ committing:
 - `make build` / `make release` — build the debug or release binary.
 - `make test` — `cargo test --all-targets --all-features` with `-D warnings`.
 - `make lint` — first runs `make interrogate` (Python docstring coverage over
-  `tests`; it needs `uv` and fails on any undocumented definition or `MISSED`
-  row), then runs `cargo doc --no-deps`, then
+  `scripts` and `tests`; it needs `uv` and fails on any undocumented definition
+  or `MISSED` row), then runs `cargo doc --no-deps`, then
   `cargo clippy --all-targets --all-features -- -D warnings`, then the Whitaker
   Dylint suite (`whitaker --all`) against the same targets and features, and
   finally the spelling gate (see below).
@@ -549,6 +549,10 @@ target; `.github/cv005.toml` holds the repository name and nothing else. A
 Dependabot pull request merged by the automerge workflow fires no push event,
 so that merge publishes nothing until the next push to `main` (shared-actions
 issue 518 tracks the fix).
+
+A `uv` that reports only `Git operation failed` for a Git source missing from
+the cache is not retried online by the helper: warm the cache once by running
+`uv tool run` on that source, or use a `uv` that names the offline reason.
 
 ## YAML lint
 
