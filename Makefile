@@ -39,16 +39,27 @@ STANDARD_RUSTFLAGS := -Zthreads=8$(if $(filter Linux,$(BUILD_HOST_OS)), -Clink-a
 build: target/debug/$(TARGET) ## Build debug binary
 release: target/release/$(TARGET) ## Build release binary
 
-UV ?= uv
-UV_ENV ?=
+# Every uv call but the spelling builder's goes through the vendored helper,
+# which cleans the environment, uses the global uv cache, runs offline first and
+# goes online at most once. The builder runs directly at its release tag,
+# because the spelling baseline requires that form and the helper accepts only
+# a full commit. See
+# https://github.com/leynos/shared-actions/tree/main/uv_gate for the contract.
+# `scripts/uv_gate.py` is the shared-actions helper, vendored byte for byte, so
+# update it by copying the canonical file, never by editing it here. The helper
+# finds uv on PATH (outside ~/.lody, which it removes), so there is no UV
+# override: put the uv you want first. It needs python3 3.9 or newer. A uv
+# that reports only `Git operation failed` for a Git source missing from the
+# cache is not retried online: warm the cache once with `uv tool run`.
+UV_GATE ?= python3 scripts/uv_gate.py
 # The shared CV-005 contract (leynos/shared-actions, `cv005-contracts`) is run
 # from a pinned commit: a fix to the rule reaches this repository as a reviewed
 # bump of the pin, not as a silent upgrade. `.github/cv005.toml` holds the
 # parameters only.
 CV005_CONTRACTS_REF ?= cabf105ae230e3759cf77b1c2d1d73ea0b67e9a9
-CV005_CONTRACTS = $(UV_ENV) $(UV) tool run --python 3.13 \
+CV005_CONTRACTS = $(UV_GATE) tool --python 3.13 \
 	--from 'git+https://github.com/leynos/shared-actions@$(CV005_CONTRACTS_REF)\#subdirectory=packages/cv005-contracts' \
-	cv005-contracts
+	-- cv005-contracts
 
 all: check-fmt lint test test-workflow-contracts ## Perform a comprehensive check of code
 
@@ -66,12 +77,12 @@ target/%/$(TARGET): ## Build binary in debug or release mode
 # owns. Add a new Python directory to INTERROGATE_TARGETS. No `--python` pin: a
 # managed interpreter would be downloaded, and a PyO3 build could link it.
 INTERROGATE_VERSION ?= 1.7.0
-INTERROGATE_TARGETS ?= tests
+INTERROGATE_TARGETS ?= scripts tests
 # Level 2 prints a MISSED row per undocumented definition, which the
 # `interrogate` target fails on: the rounded percentage alone passes a lone gap.
 INTERROGATE_FLAGS ?= -vv --fail-under 100
-INTERROGATE = $(UV_ENV) $(UV) tool run \
-	--from 'interrogate==$(INTERROGATE_VERSION)' interrogate
+INTERROGATE = $(UV_GATE) tool \
+	--from 'interrogate==$(INTERROGATE_VERSION)' -- interrogate
 
 # Interrogate rounds its percentage to one decimal, so `--fail-under 100` alone
 # passes a lone gap in a large repository; fail on any MISSED row as well.
@@ -125,7 +136,7 @@ help: ## Show available targets
 
 test-workflow-contracts: ## Validate the CodeScene coverage workflow contract (CV-005)
 	$(CV005_CONTRACTS) check --repository .
-	$(UV_ENV) $(UV) run --python 3.13 --with 'pytest>=8,<10' --with 'pyyaml>=6,<7' pytest tests/workflow_contracts -q
+	$(UV_GATE) tool --python 3.13 --from 'pytest==9.2.0' --with 'pyyaml==6.0.3' -- pytest tests/workflow_contracts -q
 
 YAMLLINT ?= yamllint
 ACTIONLINT ?= actionlint

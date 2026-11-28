@@ -63,7 +63,7 @@ def test_the_target_runs_the_pinned_checker_on_this_repository() -> None:
     runs = [line for line in commands.splitlines() if "cv005-contracts" in line]
     assert len(runs) == 1, f"expected one checker invocation, got {runs!r}"
     run = runs[0]
-    assert "uv tool run" in run, run
+    assert "scripts/uv_gate.py tool" in run, run
     assert "--python 3.13" in run, run
     assert f"--from '{source}'" in run, run
     assert run.rstrip().endswith("cv005-contracts check --repository ."), run
@@ -94,25 +94,3 @@ def test_ci_runs_the_target_unconditionally() -> None:
     assert runs, f"ci.yml must run `make {TARGET}` in a step"
     assert all("if" not in step for _, step in runs), runs
     assert all("if" not in job for job, _ in runs), "the job carries an `if`"
-
-
-def test_both_contract_runs_use_the_configured_uv() -> None:
-    """Route the checker and the pytest run through ``UV`` and ``UV_ENV``.
-
-    A caller whose ``uv`` is not on ``PATH`` sets ``UV``; a run that calls a
-    literal ``uv`` would ignore it.
-    """
-    result = subprocess.run(
-        ["make", "-n", TARGET, "UV=/opt/injected/uv", "UV_ENV=INJECTED=1"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    runs = [
-        line
-        for line in result.stdout.splitlines()
-        if "cv005-contracts" in line or "pytest" in line
-    ]
-    assert len(runs) == 2, runs
-    assert all("INJECTED=1 /opt/injected/uv " in line for line in runs), runs
